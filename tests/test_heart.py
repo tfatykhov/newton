@@ -8,28 +8,22 @@ interactions and the unified recall mechanism.
 """
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 
 from nous.brain.brain import Brain
-from nous.brain.schemas import RecordInput, ReasonInput
-from nous.config import Settings
+from nous.brain.schemas import ReasonInput, RecordInput
 from nous.heart import (
-    Heart,
     CensorInput,
     EpisodeInput,
     FactInput,
-    OpenThread,
     ProcedureInput,
     RecallResult,
     WorkingMemoryItem,
-    WorkingMemoryState,
 )
 from nous.storage.models import Event
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -303,7 +297,7 @@ async def test_working_memory_capacity(heart, session):
             ref_id=uuid.uuid4(),
             summary=f"Item {i}",
             relevance=0.5 + (i * 0.01),  # Varying relevance
-            loaded_at=datetime.now(timezone.utc),
+            loaded_at=datetime.now(UTC),
         )
         await heart.load_to_working_memory(sid, item, session=session)
 
@@ -313,7 +307,7 @@ async def test_working_memory_capacity(heart, session):
         ref_id=uuid.uuid4(),
         summary="New overflow item",
         relevance=0.99,
-        loaded_at=datetime.now(timezone.utc),
+        loaded_at=datetime.now(UTC),
     )
     state = await heart.load_to_working_memory(sid, new_item, session=session)
 
@@ -430,7 +424,7 @@ async def test_events_emitted(heart, session):
     assert found, "episode_started event not found with correct episode_id"
 
     # Learn a fact — should emit fact_learned
-    fact = await heart.learn(
+    await heart.learn(
         _fact_input(content="Event emission test fact"),
         session=session,
     )

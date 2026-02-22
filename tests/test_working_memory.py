@@ -5,18 +5,13 @@ Heart methods receive the test session via the session parameter (P1-1).
 """
 
 import uuid
-from datetime import datetime, timezone
-
-import pytest
-import pytest_asyncio
+from datetime import UTC, datetime
 
 from nous.heart import (
-    Heart,
     OpenThread,
     WorkingMemoryItem,
     WorkingMemoryState,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,7 +25,7 @@ def _make_item(type_: str = "fact", relevance: float = 0.5, **overrides) -> Work
         ref_id=uuid.uuid4(),
         summary="Test item",
         relevance=relevance,
-        loaded_at=datetime.now(timezone.utc),
+        loaded_at=datetime.now(UTC),
     )
     defaults.update(overrides)
     return WorkingMemoryItem(**defaults)
@@ -178,7 +173,7 @@ async def test_add_thread(heart, session):
     thread = OpenThread(
         description="Investigate memory leak",
         priority="high",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     state = await heart.working_memory.add_thread(
         sid, thread, session=session
@@ -202,12 +197,12 @@ async def test_resolve_thread(heart, session):
     thread1 = OpenThread(
         description="Fix the login bug",
         priority="high",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     thread2 = OpenThread(
         description="Review PR #42",
         priority="medium",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
     await heart.working_memory.add_thread(sid, thread1, session=session)

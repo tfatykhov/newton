@@ -7,7 +7,7 @@ All methods follow Brain's session injection pattern (P1-1).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -136,7 +136,7 @@ class EpisodeManager:
         if episode is None:
             raise ValueError(f"Episode {episode_id} not found")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         episode.ended_at = now
         episode.duration_seconds = int((now - episode.started_at).total_seconds())
         episode.outcome = outcome

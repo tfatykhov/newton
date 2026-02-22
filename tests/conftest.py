@@ -12,7 +12,6 @@ from nous.config import Settings
 from nous.storage.database import Database
 from nous.storage.models import Guardrail
 
-
 # ---------------------------------------------------------------------------
 # Mock embedding provider (P1-4 fix: PRNG-seeded, L2-normalized vectors)
 # ---------------------------------------------------------------------------
@@ -115,8 +114,8 @@ def mock_embeddings() -> MockEmbeddingProvider:
 @pytest_asyncio.fixture
 async def heart(db, mock_embeddings):
     """Heart instance with mock embeddings for testing."""
-    from nous.heart import Heart
     from nous.config import Settings
+    from nous.heart import Heart
 
     settings = Settings()
     h = Heart(db, settings, embedding_provider=mock_embeddings)

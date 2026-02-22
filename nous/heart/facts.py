@@ -7,7 +7,7 @@ All methods follow Brain's session injection pattern (P1-1).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -193,7 +193,7 @@ class FactManager:
 
         # P2-9: NULL-safe counter increment
         fact.confirmation_count = (fact.confirmation_count or 0) + 1
-        fact.last_confirmed = datetime.now(timezone.utc)
+        fact.last_confirmed = datetime.now(UTC)
         await session.flush()
 
         await self._emit_event(

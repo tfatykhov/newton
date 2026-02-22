@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -462,7 +462,10 @@ class Brain:
             return []
 
         decision_ids = [row.id for row in rows]
-        scores_by_id = {row.id: float(row.combined_score if hasattr(row, "combined_score") else row.score) for row in rows}
+        scores_by_id = {
+            row.id: float(row.combined_score if hasattr(row, "combined_score") else row.score)
+            for row in rows
+        }
 
         # Fetch decision data
         decisions_result = await session.execute(
@@ -579,7 +582,7 @@ class Brain:
 
         decision.outcome = validated.outcome
         decision.outcome_result = validated.result
-        decision.reviewed_at = datetime.now(timezone.utc)
+        decision.reviewed_at = datetime.now(UTC)
 
         await session.flush()
 

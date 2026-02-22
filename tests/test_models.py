@@ -1,6 +1,5 @@
 """Tests for ORM models: CRUD, relationships, constraints, cross-schema linking."""
 
-import uuid
 
 import pytest
 from sqlalchemy import select
@@ -140,7 +139,6 @@ async def test_decision_with_reasons(session):
     await session.commit()
 
     # Verify reasons exist
-    decision_id = decision.id
     reason_ids = [r.id for r in decision.reasons]
     assert len(reason_ids) == 2
 

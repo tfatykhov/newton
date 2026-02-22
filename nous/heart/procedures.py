@@ -7,7 +7,7 @@ All methods follow Brain's session injection pattern (P1-1).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -122,7 +122,7 @@ class ProcedureManager:
 
         # P2-9: NULL-safe counter
         procedure.activation_count = (procedure.activation_count or 0) + 1
-        procedure.last_activated = datetime.now(timezone.utc)
+        procedure.last_activated = datetime.now(UTC)
         await session.flush()
 
         await self._emit_event(

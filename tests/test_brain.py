@@ -17,12 +17,11 @@ from nous.brain.schemas import (
     DecisionSummary,
     GraphEdgeInfo,
     GuardrailResult,
-    RecordInput,
     ReasonInput,
+    RecordInput,
     ThoughtInfo,
 )
-from nous.config import Settings
-from nous.storage.models import Decision, Event, Guardrail
+from nous.storage.models import Event
 
 # Must match conftest.GUARDRAIL_TEST_AGENT
 GUARDRAIL_TEST_AGENT = "test-guardrail-agent"

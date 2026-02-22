@@ -5,15 +5,12 @@ Heart methods receive the test session via the session parameter (P1-1).
 """
 
 import pytest
-import pytest_asyncio
 
 from nous.heart import (
-    Heart,
     ProcedureDetail,
     ProcedureInput,
     ProcedureSummary,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

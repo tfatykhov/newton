@@ -4,20 +4,14 @@ All tests use real Postgres via the SAVEPOINT fixture from conftest.py.
 Heart methods receive the test session via the session parameter (P1-1).
 """
 
-import uuid
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import select
 
 from nous.heart import (
-    Heart,
     EpisodeInput,
     FactDetail,
     FactInput,
-    FactSummary,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

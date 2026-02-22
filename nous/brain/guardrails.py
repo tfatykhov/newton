@@ -7,7 +7,7 @@ Conditions use AND logic: all conditions in a guardrail must match to trigger.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +77,7 @@ class GuardrailEngine:
                     .where(Guardrail.id == guardrail.id)
                     .values(
                         activation_count=Guardrail.activation_count + 1,
-                        last_activated=datetime.now(timezone.utc),
+                        last_activated=datetime.now(UTC),
                     )
                 )
 

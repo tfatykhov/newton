@@ -4,23 +4,17 @@ All tests use real Postgres via the SAVEPOINT fixture from conftest.py.
 Heart methods receive the test session via the session parameter (P1-1).
 """
 
-import uuid
 
-import pytest
-import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from nous.brain.brain import Brain
-from nous.brain.schemas import RecordInput, ReasonInput
-from nous.config import Settings
+from nous.brain.schemas import ReasonInput, RecordInput
 from nous.heart import (
-    Heart,
     EpisodeDetail,
     EpisodeInput,
     EpisodeSummary,
 )
 from nous.storage.models import EpisodeDecision, EpisodeProcedure
-
 
 # ---------------------------------------------------------------------------
 # Helpers

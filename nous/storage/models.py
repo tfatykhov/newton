@@ -164,7 +164,8 @@ class DecisionReason(Base):
     __tablename__ = "decision_reasons"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('analysis', 'pattern', 'empirical', 'authority', 'intuition', 'analogy', 'elimination', 'constraint')",
+            "type IN ('analysis', 'pattern', 'empirical', 'authority',"
+            " 'intuition', 'analogy', 'elimination', 'constraint')",
             name="ck_reasons_type",
         ),
         {"schema": "brain"},

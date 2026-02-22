@@ -8,20 +8,14 @@ Key MockEmbeddingProvider behavior:
 - Different text = cosine ~0.0 (no match)
 """
 
-import uuid
 
-import pytest
-import pytest_asyncio
 from sqlalchemy import select
 
 from nous.heart import (
-    Heart,
     CensorDetail,
     CensorInput,
-    CensorMatch,
 )
 from nous.storage.models import Censor
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -317,7 +311,7 @@ async def test_search_read_only(heart, session):
     initial_count = censor.activation_count
 
     # Use heart.censors.search() directly (read-only)
-    results = await heart.censors.search(
+    await heart.censors.search(
         "read only search test censor read only search test reason",
         session=session,
     )

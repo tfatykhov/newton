@@ -8,7 +8,7 @@ pattern (P1-1).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -152,7 +152,7 @@ class CensorManager:
 
         # Apply side effects for each match
         results: list[CensorMatch] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for censor, _similarity in matches:
             # Increment activation_count (P2-9: NULL-safe)
@@ -466,7 +466,7 @@ class CensorManager:
 
         # P2-9: NULL-safe counter
         censor.false_positive_count = (censor.false_positive_count or 0) + 1
-        censor.last_false_positive = datetime.now(timezone.utc)
+        censor.last_false_positive = datetime.now(UTC)
 
         # Log warning if more than half are false positives
         act_count = censor.activation_count or 0

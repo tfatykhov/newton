@@ -30,7 +30,6 @@ from nous.heart.schemas import (
     FactDetail,
     FactInput,
     FactSummary,
-    OpenThread,
     ProcedureDetail,
     ProcedureInput,
     ProcedureOutcome,
