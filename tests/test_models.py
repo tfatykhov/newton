@@ -1,6 +1,5 @@
 """Tests for ORM models: CRUD, relationships, constraints, cross-schema linking."""
 
-
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -30,9 +29,7 @@ async def test_create_decision(session):
     session.add(decision)
     await session.commit()
 
-    result = await session.execute(
-        select(Decision).where(Decision.id == decision.id)
-    )
+    result = await session.execute(select(Decision).where(Decision.id == decision.id))
     loaded = result.scalar_one()
     assert loaded.agent_id == "test-agent"
     assert loaded.description == "Use PostgreSQL for storage"
@@ -56,9 +53,7 @@ async def test_create_episode(session):
     session.add(episode)
     await session.commit()
 
-    result = await session.execute(
-        select(Episode).where(Episode.id == episode.id)
-    )
+    result = await session.execute(select(Episode).where(Episode.id == episode.id))
     loaded = result.scalar_one()
     assert loaded.agent_id == "test-agent"
     assert loaded.summary == "Implemented database schema for Nous project"
@@ -79,9 +74,7 @@ async def test_create_fact(session):
     session.add(fact)
     await session.commit()
 
-    result = await session.execute(
-        select(Fact).where(Fact.id == fact.id)
-    )
+    result = await session.execute(select(Fact).where(Fact.id == fact.id))
     loaded = result.scalar_one()
     assert loaded.content == "PostgreSQL supports vector similarity search via pgvector"
     assert loaded.category == "technical"
@@ -106,16 +99,12 @@ async def test_decision_with_tags(session):
     await session.commit()
 
     # Query by tag
-    result = await session.execute(
-        select(DecisionTag).where(DecisionTag.tag == "python")
-    )
+    result = await session.execute(select(DecisionTag).where(DecisionTag.tag == "python"))
     tag = result.scalar_one()
     assert tag.decision_id == decision.id
 
     # Verify tags accessible from decision
-    result = await session.execute(
-        select(Decision).where(Decision.id == decision.id)
-    )
+    result = await session.execute(select(Decision).where(Decision.id == decision.id))
     loaded = result.scalar_one()
     await session.refresh(loaded, ["tags"])
     tag_values = {t.tag for t in loaded.tags}
@@ -148,9 +137,7 @@ async def test_decision_with_reasons(session):
 
     # Verify reasons were cascade deleted
     for rid in reason_ids:
-        result = await session.execute(
-            select(DecisionReason).where(DecisionReason.id == rid)
-        )
+        result = await session.execute(select(DecisionReason).where(DecisionReason.id == rid))
         assert result.scalar_one_or_none() is None
 
 
@@ -231,9 +218,7 @@ async def test_null_embedding(session):
     session.add(decision)
     await session.commit()
 
-    result = await session.execute(
-        select(Decision).where(Decision.id == decision.id)
-    )
+    result = await session.execute(select(Decision).where(Decision.id == decision.id))
     loaded = result.scalar_one()
     assert loaded.embedding is None
 

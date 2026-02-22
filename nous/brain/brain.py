@@ -84,9 +84,7 @@ class Brain:
     # record()
     # ------------------------------------------------------------------
 
-    async def record(
-        self, input: RecordInput, session: AsyncSession | None = None
-    ) -> DecisionDetail:
+    async def record(self, input: RecordInput, session: AsyncSession | None = None) -> DecisionDetail:
         """Record a new decision with all associated data."""
         if session is None:
             async with self.db.session() as session:
@@ -95,9 +93,7 @@ class Brain:
                 return result
         return await self._record(input, session)
 
-    async def _record(
-        self, input: RecordInput, session: AsyncSession
-    ) -> DecisionDetail:
+    async def _record(self, input: RecordInput, session: AsyncSession) -> DecisionDetail:
         """Internal record implementation using provided session.
 
         Steps 4-7 use ORM cascade — single session.add(decision) inserts
@@ -119,14 +115,10 @@ class Brain:
             try:
                 embedding = await self.embeddings.embed(embed_text)
             except Exception:
-                logger.warning(
-                    "Embedding generation failed, recording without embedding"
-                )
+                logger.warning("Embedding generation failed, recording without embedding")
 
         # 3. Extract bridge
-        bridge_info = self.bridge_extractor.extract(
-            input.description, input.context, input.pattern
-        )
+        bridge_info = self.bridge_extractor.extract(input.description, input.context, input.pattern)
 
         # 4-7. Insert decision with cascade-populated relationships
         decision = Decision(
@@ -143,9 +135,7 @@ class Brain:
 
         # Populate relationships for ORM cascade
         decision.tags = [DecisionTag(tag=t) for t in input.tags]
-        decision.reasons = [
-            DecisionReason(type=r.type, text=r.text) for r in input.reasons
-        ]
+        decision.reasons = [DecisionReason(type=r.type, text=r.text) for r in input.reasons]
         if bridge_info.structure or bridge_info.function:
             decision.bridge = DecisionBridge(
                 structure=bridge_info.structure,
@@ -169,9 +159,7 @@ class Brain:
             async with session.begin_nested():
                 await self._auto_link(decision.id, session)
         except Exception:
-            logger.warning(
-                "auto_link failed for decision %s, continuing", decision.id
-            )
+            logger.warning("auto_link failed for decision %s, continuing", decision.id)
 
         # Re-fetch with eager loading to avoid lazy-load issues
         decision = await self._get_decision_orm(decision.id, session)
@@ -192,14 +180,10 @@ class Brain:
         """Update a decision's description, context, or pattern."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._update(
-                    decision_id, description, context, pattern, session
-                )
+                result = await self._update(decision_id, description, context, pattern, session)
                 await session.commit()
                 return result
-        return await self._update(
-            decision_id, description, context, pattern, session
-        )
+        return await self._update(decision_id, description, context, pattern, session)
 
     async def _update(
         self,
@@ -252,9 +236,7 @@ class Brain:
                 logger.warning("Embedding re-generation failed during update")
 
         # Re-extract bridge
-        bridge_info = self.bridge_extractor.extract(
-            decision.description, decision.context, decision.pattern
-        )
+        bridge_info = self.bridge_extractor.extract(decision.description, decision.context, decision.pattern)
         if decision.bridge:
             decision.bridge.structure = bridge_info.structure
             decision.bridge.function = bridge_info.function
@@ -316,18 +298,14 @@ class Brain:
     # get()
     # ------------------------------------------------------------------
 
-    async def get(
-        self, decision_id: UUID, session: AsyncSession | None = None
-    ) -> DecisionDetail | None:
+    async def get(self, decision_id: UUID, session: AsyncSession | None = None) -> DecisionDetail | None:
         """Fetch a single decision with all relations."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get(decision_id, session)
         return await self._get(decision_id, session)
 
-    async def _get(
-        self, decision_id: UUID, session: AsyncSession
-    ) -> DecisionDetail | None:
+    async def _get(self, decision_id: UUID, session: AsyncSession) -> DecisionDetail | None:
         decision = await self._get_decision_orm(decision_id, session)
         if decision is None:
             return None
@@ -350,12 +328,8 @@ class Brain:
         """Perform hybrid search (vector + keyword) with optional filters."""
         if session is None:
             async with self.db.session() as session:
-                return await self._query(
-                    query_text, limit, category, stakes, outcome, bridge_side, session
-                )
-        return await self._query(
-            query_text, limit, category, stakes, outcome, bridge_side, session
-        )
+                return await self._query(query_text, limit, category, stakes, outcome, bridge_side, session)
+        return await self._query(query_text, limit, category, stakes, outcome, bridge_side, session)
 
     async def _query(
         self,
@@ -463,20 +437,15 @@ class Brain:
 
         decision_ids = [row.id for row in rows]
         scores_by_id = {
-            row.id: float(row.combined_score if hasattr(row, "combined_score") else row.score)
-            for row in rows
+            row.id: float(row.combined_score if hasattr(row, "combined_score") else row.score) for row in rows
         }
 
         # Fetch decision data
-        decisions_result = await session.execute(
-            select(Decision).where(Decision.id.in_(decision_ids))
-        )
+        decisions_result = await session.execute(select(Decision).where(Decision.id.in_(decision_ids)))
         decisions = {d.id: d for d in decisions_result.scalars().all()}
 
         # Separate tag query (P2-17)
-        tag_result = await session.execute(
-            select(DecisionTag).where(DecisionTag.decision_id.in_(decision_ids))
-        )
+        tag_result = await session.execute(select(DecisionTag).where(DecisionTag.decision_id.in_(decision_ids)))
         tags_by_id: dict[UUID, list[str]] = defaultdict(list)
         for tag_row in tag_result.scalars().all():
             tags_by_id[tag_row.decision_id].append(tag_row.tag)
@@ -602,9 +571,7 @@ class Brain:
     # get_calibration()
     # ------------------------------------------------------------------
 
-    async def get_calibration(
-        self, session: AsyncSession | None = None
-    ) -> CalibrationReport:
+    async def get_calibration(self, session: AsyncSession | None = None) -> CalibrationReport:
         """Compute full calibration report."""
         if session is None:
             async with self.db.session() as session:
@@ -626,14 +593,10 @@ class Brain:
         """Create a graph edge between two decisions."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._link(
-                    source_id, target_id, relation, weight, False, session
-                )
+                result = await self._link(source_id, target_id, relation, weight, False, session)
                 await session.commit()
                 return result
-        return await self._link(
-            source_id, target_id, relation, weight, False, session
-        )
+        return await self._link(source_id, target_id, relation, weight, False, session)
 
     async def _link(
         self,
@@ -698,12 +661,8 @@ class Brain:
         session: AsyncSession,
     ) -> list[DecisionSummary]:
         # Find edges where this decision is source or target
-        source_q = select(GraphEdge.target_id.label("neighbor_id")).where(
-            GraphEdge.source_id == decision_id
-        )
-        target_q = select(GraphEdge.source_id.label("neighbor_id")).where(
-            GraphEdge.target_id == decision_id
-        )
+        source_q = select(GraphEdge.target_id.label("neighbor_id")).where(GraphEdge.source_id == decision_id)
+        target_q = select(GraphEdge.source_id.label("neighbor_id")).where(GraphEdge.target_id == decision_id)
 
         if relation:
             source_q = source_q.where(GraphEdge.relation == relation)
@@ -717,15 +676,11 @@ class Brain:
             return []
 
         # Fetch decisions
-        dec_result = await session.execute(
-            select(Decision).where(Decision.id.in_(neighbor_ids))
-        )
+        dec_result = await session.execute(select(Decision).where(Decision.id.in_(neighbor_ids)))
         decisions = dec_result.scalars().all()
 
         # Fetch tags (P2-17)
-        tag_result = await session.execute(
-            select(DecisionTag).where(DecisionTag.decision_id.in_(neighbor_ids))
-        )
+        tag_result = await session.execute(select(DecisionTag).where(DecisionTag.decision_id.in_(neighbor_ids)))
         tags_by_id: dict[UUID, list[str]] = defaultdict(list)
         for t in tag_result.scalars().all():
             tags_by_id[t.decision_id].append(t.tag)
@@ -759,9 +714,7 @@ class Brain:
         """Find and link similar decisions automatically."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._auto_link(
-                    decision_id, session, threshold, max_links
-                )
+                result = await self._auto_link(decision_id, session, threshold, max_links)
                 await session.commit()
                 return result
         return await self._auto_link(decision_id, session, threshold, max_links)
@@ -831,9 +784,7 @@ class Brain:
                     weight=float(row.similarity),
                     auto_linked=True,
                 )
-                .on_conflict_do_nothing(
-                    constraint="uq_edges_src_tgt_rel"
-                )
+                .on_conflict_do_nothing(constraint="uq_edges_src_tgt_rel")
             )
             await session.execute(stmt)
 
@@ -885,9 +836,7 @@ class Brain:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_decision_orm(
-        self, decision_id: UUID, session: AsyncSession
-    ) -> Decision | None:
+    async def _get_decision_orm(self, decision_id: UUID, session: AsyncSession) -> Decision | None:
         """Fetch a Decision ORM object with all relationships eagerly loaded.
 
         Scoped by agent_id to enforce multi-agent data isolation.
@@ -930,12 +879,7 @@ class Brain:
             created_at=decision.created_at,
             updated_at=decision.updated_at,
             tags=[t.tag for t in decision.tags],
-            reasons=[
-                ReasonInput(type=r.type, text=r.text) for r in decision.reasons
-            ],
+            reasons=[ReasonInput(type=r.type, text=r.text) for r in decision.reasons],
             bridge=bridge,
-            thoughts=[
-                ThoughtInfo(id=t.id, text=t.text, created_at=t.created_at)
-                for t in decision.thoughts
-            ],
+            thoughts=[ThoughtInfo(id=t.id, text=t.text, created_at=t.created_at) for t in decision.thoughts],
         )

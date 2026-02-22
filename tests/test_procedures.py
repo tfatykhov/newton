@@ -128,9 +128,7 @@ async def test_record_outcome_effectiveness(heart, session):
     # Record 2 successes and 1 failure
     await heart.record_procedure_outcome(detail.id, "success", session=session)
     await heart.record_procedure_outcome(detail.id, "success", session=session)
-    result = await heart.record_procedure_outcome(
-        detail.id, "failure", session=session
-    )
+    result = await heart.record_procedure_outcome(detail.id, "failure", session=session)
 
     assert result.success_count == 2
     assert result.failure_count == 1

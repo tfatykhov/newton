@@ -12,14 +12,10 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 # Type aliases using Literal for compile-time validation
-CategoryType = Literal[
-    "architecture", "process", "tooling", "security", "integration"
-]
+CategoryType = Literal["architecture", "process", "tooling", "security", "integration"]
 StakesType = Literal["low", "medium", "high", "critical"]
 OutcomeType = Literal["pending", "success", "partial", "failure"]
-RelationType = Literal[
-    "supports", "contradicts", "supersedes", "related_to", "caused_by"
-]
+RelationType = Literal["supports", "contradicts", "supersedes", "related_to", "caused_by"]
 ReasonType = Literal[
     "analysis",
     "pattern",

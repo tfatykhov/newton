@@ -4,7 +4,6 @@ All tests use real Postgres via the SAVEPOINT fixture from conftest.py.
 Heart methods receive the test session via the session parameter (P1-1).
 """
 
-
 import pytest
 
 from nous.heart import (
@@ -103,9 +102,7 @@ async def test_confirm_fact(heart, session):
 
 async def test_supersede_chain(heart, session):
     """A superseded by B, B by C. A and B inactive, C active."""
-    fact_a = await heart.learn(
-        _fact_input(content="Fact A original version"), session=session
-    )
+    fact_a = await heart.learn(_fact_input(content="Fact A original version"), session=session)
     fact_b = await heart.supersede_fact(
         fact_a.id,
         _fact_input(content="Fact B replaces A"),
@@ -200,9 +197,7 @@ async def test_search_active_only(heart, session):
         session=session,
     )
 
-    results = await heart.search_facts(
-        "Active search test original fact", session=session
-    )
+    results = await heart.search_facts("Active search test original fact", session=session)
     # The superseded fact should NOT appear in active-only search
     ids = [r.id for r in results]
     assert fact_a.id not in ids
@@ -254,9 +249,7 @@ async def test_deactivate(heart, session):
     await heart.deactivate_fact(fact.id, session=session)
 
     # Should not appear in active search
-    results = await heart.search_facts(
-        "Deactivation test fact to remove", session=session
-    )
+    results = await heart.search_facts("Deactivation test fact to remove", session=session)
     ids = [r.id for r in results]
     assert fact.id not in ids
 

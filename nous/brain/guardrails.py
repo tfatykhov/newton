@@ -82,11 +82,7 @@ class GuardrailEngine:
                 )
 
                 # Log trigger event
-                event_type = (
-                    "guardrail_blocked"
-                    if guardrail.severity in ("block", "absolute")
-                    else "guardrail_warned"
-                )
+                event_type = "guardrail_blocked" if guardrail.severity in ("block", "absolute") else "guardrail_warned"
                 event = Event(
                     agent_id=agent_id,
                     event_type=event_type,
@@ -101,9 +97,7 @@ class GuardrailEngine:
                 session.add(event)
 
         allowed = len(blocked_by) == 0
-        return GuardrailResult(
-            allowed=allowed, blocked_by=blocked_by, warnings=warnings
-        )
+        return GuardrailResult(allowed=allowed, blocked_by=blocked_by, warnings=warnings)
 
     def _matches(
         self,

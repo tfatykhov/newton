@@ -40,9 +40,7 @@ class EpisodeManager:
     # Event helper
     # ------------------------------------------------------------------
 
-    async def _emit_event(
-        self, session: AsyncSession, event_type: str, data: dict
-    ) -> None:
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
         """Insert event in same session (P2-1)."""
         event = Event(
             agent_id=self.agent_id,
@@ -55,9 +53,7 @@ class EpisodeManager:
     # start()
     # ------------------------------------------------------------------
 
-    async def start(
-        self, input: EpisodeInput, session: AsyncSession | None = None
-    ) -> EpisodeDetail:
+    async def start(self, input: EpisodeInput, session: AsyncSession | None = None) -> EpisodeDetail:
         """Start a new episode."""
         if session is None:
             async with self.db.session() as session:
@@ -66,9 +62,7 @@ class EpisodeManager:
                 return result
         return await self._start(input, session)
 
-    async def _start(
-        self, input: EpisodeInput, session: AsyncSession
-    ) -> EpisodeDetail:
+    async def _start(self, input: EpisodeInput, session: AsyncSession) -> EpisodeDetail:
         # Generate embedding from title + summary
         embedding = None
         if self.embeddings:
@@ -92,9 +86,7 @@ class EpisodeManager:
         session.add(episode)
         await session.flush()
 
-        await self._emit_event(
-            session, "episode_started", {"episode_id": str(episode.id)}
-        )
+        await self._emit_event(session, "episode_started", {"episode_id": str(episode.id)})
 
         # Re-fetch with eager loading to avoid lazy-load MissingGreenlet
         episode = await self._get_episode_orm(episode.id, session)
@@ -115,14 +107,10 @@ class EpisodeManager:
         """Close an episode with outcome and lessons."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._end(
-                    episode_id, outcome, lessons_learned, surprise_level, session
-                )
+                result = await self._end(episode_id, outcome, lessons_learned, surprise_level, session)
                 await session.commit()
                 return result
-        return await self._end(
-            episode_id, outcome, lessons_learned, surprise_level, session
-        )
+        return await self._end(episode_id, outcome, lessons_learned, surprise_level, session)
 
     async def _end(
         self,
@@ -146,8 +134,7 @@ class EpisodeManager:
         # P3-7: Regenerate embedding incorporating outcome + lessons
         if self.embeddings:
             embed_text = (
-                f"{episode.title or ''} {episode.summary} "
-                f"{outcome} {' '.join(lessons_learned or [])}"
+                f"{episode.title or ''} {episode.summary} {outcome} {' '.join(lessons_learned or [])}"
             ).strip()
             try:
                 episode.embedding = await self.embeddings.embed(embed_text)
@@ -212,9 +199,7 @@ class EpisodeManager:
         """Insert into heart.episode_procedures with optional effectiveness."""
         if session is None:
             async with self.db.session() as session:
-                await self._link_procedure(
-                    episode_id, procedure_id, effectiveness, session
-                )
+                await self._link_procedure(episode_id, procedure_id, effectiveness, session)
                 await session.commit()
                 return
         await self._link_procedure(episode_id, procedure_id, effectiveness, session)
@@ -238,18 +223,14 @@ class EpisodeManager:
     # get()
     # ------------------------------------------------------------------
 
-    async def get(
-        self, episode_id: UUID, session: AsyncSession | None = None
-    ) -> EpisodeDetail | None:
+    async def get(self, episode_id: UUID, session: AsyncSession | None = None) -> EpisodeDetail | None:
         """Fetch episode with linked decision_ids."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get(episode_id, session)
         return await self._get(episode_id, session)
 
-    async def _get(
-        self, episode_id: UUID, session: AsyncSession
-    ) -> EpisodeDetail | None:
+    async def _get(self, episode_id: UUID, session: AsyncSession) -> EpisodeDetail | None:
         episode = await self._get_episode_orm(episode_id, session)
         if episode is None:
             return None
@@ -306,18 +287,14 @@ class EpisodeManager:
     # search()
     # ------------------------------------------------------------------
 
-    async def search(
-        self, query: str, limit: int = 10, session: AsyncSession | None = None
-    ) -> list[EpisodeSummary]:
+    async def search(self, query: str, limit: int = 10, session: AsyncSession | None = None) -> list[EpisodeSummary]:
         """Hybrid search over episodes using search.py helper."""
         if session is None:
             async with self.db.session() as session:
                 return await self._search(query, limit, session)
         return await self._search(query, limit, session)
 
-    async def _search(
-        self, query: str, limit: int, session: AsyncSession
-    ) -> list[EpisodeSummary]:
+    async def _search(self, query: str, limit: int, session: AsyncSession) -> list[EpisodeSummary]:
         # Generate query embedding
         embedding = None
         if self.embeddings:
@@ -342,9 +319,7 @@ class EpisodeManager:
         ids = [r[0] for r in results]
         scores = {r[0]: r[1] for r in results}
 
-        ep_result = await session.execute(
-            select(Episode).where(Episode.id.in_(ids))
-        )
+        ep_result = await session.execute(select(Episode).where(Episode.id.in_(ids)))
         episodes = {e.id: e for e in ep_result.scalars().all()}
 
         # Preserve search order
@@ -366,9 +341,7 @@ class EpisodeManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_episode_orm(
-        self, episode_id: UUID, session: AsyncSession
-    ) -> Episode | None:
+    async def _get_episode_orm(self, episode_id: UUID, session: AsyncSession) -> Episode | None:
         """Fetch Episode ORM with eager-loaded relationships, scoped by agent_id."""
         result = await session.execute(
             select(Episode)
@@ -380,9 +353,7 @@ class EpisodeManager:
 
     def _to_detail(self, episode: Episode) -> EpisodeDetail:
         """Convert ORM Episode to EpisodeDetail DTO."""
-        decision_ids = [
-            ed.decision_id for ed in (episode.episode_decisions or [])
-        ]
+        decision_ids = [ed.decision_id for ed in (episode.episode_decisions or [])]
         return EpisodeDetail(
             id=episode.id,
             agent_id=episode.agent_id,

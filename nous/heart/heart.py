@@ -68,9 +68,7 @@ class Heart:
         # Initialize managers
         self.episodes = EpisodeManager(database, embedding_provider, settings.agent_id)
         self.facts = FactManager(database, embedding_provider, settings.agent_id)
-        self.procedures = ProcedureManager(
-            database, embedding_provider, settings.agent_id
-        )
+        self.procedures = ProcedureManager(database, embedding_provider, settings.agent_id)
         self.censors = CensorManager(database, embedding_provider, settings.agent_id)
         self.working_memory = WorkingMemoryManager(database, settings.agent_id)
 
@@ -115,13 +113,9 @@ class Heart:
         session: AsyncSession | None = None,
     ) -> EpisodeDetail:
         """Close an episode with outcome and lessons."""
-        return await self.episodes.end(
-            episode_id, outcome, lessons_learned, surprise_level, session
-        )
+        return await self.episodes.end(episode_id, outcome, lessons_learned, surprise_level, session)
 
-    async def get_episode(
-        self, episode_id: UUID, session: AsyncSession | None = None
-    ) -> EpisodeDetail:
+    async def get_episode(self, episode_id: UUID, session: AsyncSession | None = None) -> EpisodeDetail:
         """Fetch a single episode. Raises ValueError if not found (P2-7)."""
         result = await self.episodes.get(episode_id, session)
         if result is None:
@@ -154,9 +148,7 @@ class Heart:
         session: AsyncSession | None = None,
     ) -> None:
         """Link a procedure to an episode."""
-        await self.episodes.link_procedure(
-            episode_id, procedure_id, effectiveness, session
-        )
+        await self.episodes.link_procedure(episode_id, procedure_id, effectiveness, session)
 
     async def search_episodes(
         self,
@@ -179,9 +171,7 @@ class Heart:
         """Store a new fact with deduplication."""
         return await self.facts.learn(input, session=session)
 
-    async def confirm_fact(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail:
+    async def confirm_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Confirm a fact is still true."""
         return await self.facts.confirm(fact_id, session)
 
@@ -203,9 +193,7 @@ class Heart:
         """Store a fact that contradicts an existing one."""
         return await self.facts.contradict(fact_id, new_fact, session)
 
-    async def get_fact(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail:
+    async def get_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Fetch a single fact. Raises ValueError if not found (P2-7)."""
         result = await self.facts.get(fact_id, session)
         if result is None:
@@ -223,15 +211,11 @@ class Heart:
         """Hybrid search over facts."""
         return await self.facts.search(query, limit, category, active_only, session)
 
-    async def get_current_fact(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail:
+    async def get_current_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Follow superseded_by chain to find current version."""
         return await self.facts.get_current(fact_id, session)
 
-    async def deactivate_fact(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def deactivate_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> None:
         """Soft-delete a fact."""
         await self.facts.deactivate(fact_id, session)
 
@@ -239,15 +223,11 @@ class Heart:
     # Procedures
     # ==================================================================
 
-    async def store_procedure(
-        self, input: ProcedureInput, session: AsyncSession | None = None
-    ) -> ProcedureDetail:
+    async def store_procedure(self, input: ProcedureInput, session: AsyncSession | None = None) -> ProcedureDetail:
         """Store a new procedure."""
         return await self.procedures.store(input, session)
 
-    async def activate_procedure(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> ProcedureDetail:
+    async def activate_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail:
         """Mark a procedure as activated."""
         return await self.procedures.activate(procedure_id, session)
 
@@ -260,9 +240,7 @@ class Heart:
         """Record procedure activation outcome."""
         return await self.procedures.record_outcome(procedure_id, outcome, session)
 
-    async def get_procedure(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> ProcedureDetail:
+    async def get_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail:
         """Fetch a single procedure. Raises ValueError if not found (P2-7)."""
         result = await self.procedures.get(procedure_id, session)
         if result is None:
@@ -279,9 +257,7 @@ class Heart:
         """Hybrid search over procedures."""
         return await self.procedures.search(query, limit, domain, session)
 
-    async def retire_procedure(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def retire_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> None:
         """Retire a procedure."""
         await self.procedures.retire(procedure_id, session)
 
@@ -289,9 +265,7 @@ class Heart:
     # Censors
     # ==================================================================
 
-    async def add_censor(
-        self, input: CensorInput, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def add_censor(self, input: CensorInput, session: AsyncSession | None = None) -> CensorDetail:
         """Create a new censor."""
         return await self.censors.add(input, session)
 
@@ -304,15 +278,11 @@ class Heart:
         """Check text against active censors (with side effects)."""
         return await self.censors.check(text, domain, session)
 
-    async def record_false_positive(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def record_false_positive(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
         """Record a false positive trigger."""
         return await self.censors.record_false_positive(censor_id, session)
 
-    async def escalate_censor(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def escalate_censor(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
         """Manually escalate censor severity."""
         return await self.censors.escalate(censor_id, session)
 
@@ -324,9 +294,7 @@ class Heart:
         """List all active censors."""
         return await self.censors.list_active(domain, session)
 
-    async def deactivate_censor(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def deactivate_censor(self, censor_id: UUID, session: AsyncSession | None = None) -> None:
         """Deactivate a censor."""
         await self.censors.deactivate(censor_id, session)
 
@@ -374,9 +342,7 @@ class Heart:
         """Get current working memory state."""
         return await self.working_memory.get(session_id, session)
 
-    async def clear_working_memory(
-        self, session_id: str, session: AsyncSession | None = None
-    ) -> None:
+    async def clear_working_memory(self, session_id: str, session: AsyncSession | None = None) -> None:
         """Clear working memory for session."""
         await self.working_memory.clear(session_id, session)
 
@@ -455,7 +421,8 @@ class Heart:
             if isinstance(raw_results, Exception):
                 logger.warning(
                     "Recall sub-search failed for %s: %s",
-                    memory_type, raw_results,
+                    memory_type,
+                    raw_results,
                 )
                 continue
 
@@ -470,9 +437,7 @@ class Heart:
 
         return rrf_items[:limit]
 
-    def _to_recall_result(
-        self, memory_type: str, item: object, score: float
-    ) -> RecallResult | None:
+    def _to_recall_result(self, memory_type: str, item: object, score: float) -> RecallResult | None:
         """Convert a typed search result to a RecallResult."""
         if isinstance(item, EpisodeSummary):
             return RecallResult(

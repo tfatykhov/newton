@@ -21,9 +21,7 @@ class Database:
             max_overflow=settings.db_max_overflow,
             echo=settings.log_level == "debug",
         )
-        self.session_factory = async_sessionmaker(
-            self.engine, class_=AsyncSession, expire_on_commit=False
-        )
+        self.session_factory = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
 
     async def connect(self) -> None:
         """Verify connection and schema existence."""

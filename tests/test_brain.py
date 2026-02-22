@@ -322,9 +322,7 @@ async def test_query_with_filters(brain, session):
     )
 
     # Filter by category
-    results = await brain.query(
-        "decision", category="architecture", session=session
-    )
+    results = await brain.query("decision", category="architecture", session=session)
     assert isinstance(results, list)
     for r in results:
         assert r.category == "architecture"

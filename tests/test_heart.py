@@ -79,9 +79,7 @@ def _censor_input(**overrides) -> CensorInput:
 async def test_full_episode_lifecycle(heart, db, settings, session):
     """start -> link decision -> link procedure -> end with outcome."""
     # Start episode
-    episode = await heart.start_episode(
-        _episode_input(), session=session
-    )
+    episode = await heart.start_episode(_episode_input(), session=session)
     assert episode.ended_at is None
 
     # Create and link a decision
@@ -98,17 +96,11 @@ async def test_full_episode_lifecycle(heart, db, settings, session):
     )
     await brain.close()
 
-    await heart.link_decision_to_episode(
-        episode.id, decision.id, session=session
-    )
+    await heart.link_decision_to_episode(episode.id, decision.id, session=session)
 
     # Create and link a procedure
-    procedure = await heart.store_procedure(
-        _procedure_input(), session=session
-    )
-    await heart.link_procedure_to_episode(
-        episode.id, procedure.id, effectiveness="helped", session=session
-    )
+    procedure = await heart.store_procedure(_procedure_input(), session=session)
+    await heart.link_procedure_to_episode(episode.id, procedure.id, effectiveness="helped", session=session)
 
     # End episode
     ended = await heart.end_episode(
@@ -144,9 +136,7 @@ async def test_learn_and_recall(heart, session):
     )
 
     # Search for Python fact using identical text
-    results = await heart.search_facts(
-        "Python is dynamically typed language", session=session
-    )
+    results = await heart.search_facts("Python is dynamically typed language", session=session)
     assert len(results) >= 1
 
 
@@ -244,9 +234,7 @@ async def test_procedure_lifecycle(heart, session):
     assert activated.activation_count == 1
 
     # Record success
-    result = await heart.record_procedure_outcome(
-        proc.id, "success", session=session
-    )
+    result = await heart.record_procedure_outcome(proc.id, "success", session=session)
     assert result.success_count == 1
     # Laplace: (1+1)/(1+0+2) = 2/3 ~ 0.667
     assert result.effectiveness == pytest.approx(2 / 3, abs=0.01)
@@ -351,9 +339,7 @@ async def test_unified_recall(heart, session):
     )
 
     # Recall across all types
-    results = await heart.recall(
-        "Recall test", limit=20, session=session
-    )
+    results = await heart.recall("Recall test", limit=20, session=session)
 
     assert isinstance(results, list)
     for r in results:
@@ -417,10 +403,7 @@ async def test_events_emitted(heart, session):
     assert len(events) >= 1
 
     # The event data should contain the episode_id
-    found = any(
-        e.data.get("episode_id") == str(episode.id)
-        for e in events
-    )
+    found = any(e.data.get("episode_id") == str(episode.id) for e in events)
     assert found, "episode_started event not found with correct episode_id"
 
     # Learn a fact — should emit fact_learned

@@ -42,9 +42,7 @@ class CensorManager:
     # Event helper
     # ------------------------------------------------------------------
 
-    async def _emit_event(
-        self, session: AsyncSession, event_type: str, data: dict
-    ) -> None:
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
         """Insert event in same session (P2-1)."""
         event = Event(
             agent_id=self.agent_id,
@@ -57,9 +55,7 @@ class CensorManager:
     # add()
     # ------------------------------------------------------------------
 
-    async def add(
-        self, input: CensorInput, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def add(self, input: CensorInput, session: AsyncSession | None = None) -> CensorDetail:
         """Create a new censor."""
         if session is None:
             async with self.db.session() as session:
@@ -68,9 +64,7 @@ class CensorManager:
                 return result
         return await self._add(input, session)
 
-    async def _add(
-        self, input: CensorInput, session: AsyncSession
-    ) -> CensorDetail:
+    async def _add(self, input: CensorInput, session: AsyncSession) -> CensorDetail:
         # Generate embedding from trigger_pattern + reason
         embedding = None
         if self.embeddings:
@@ -140,9 +134,7 @@ class CensorManager:
             # Semantic matching: cosine similarity > 0.7
             try:
                 embedding = await self.embeddings.embed(text_input)
-                matches = await self._semantic_match(
-                    embedding, domain, session
-                )
+                matches = await self._semantic_match(embedding, domain, session)
             except Exception:
                 logger.warning("Embedding failed for censor check, falling back to ILIKE")
                 matches = await self._keyword_match(text_input, domain, session)
@@ -161,10 +153,7 @@ class CensorManager:
 
             # Auto-escalation check
             threshold = censor.escalation_threshold or 3
-            if (
-                censor.activation_count >= threshold
-                and censor.action == "warn"
-            ):
+            if censor.activation_count >= threshold and censor.action == "warn":
                 old_action = censor.action
                 censor.action = "block"
                 await self._emit_event(
@@ -239,16 +228,10 @@ class CensorManager:
         ids = [row.id for row in rows]
         similarities = {row.id: float(row.similarity) for row in rows}
 
-        censor_result = await session.execute(
-            select(Censor).where(Censor.id.in_(ids))
-        )
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
         censors = {c.id: c for c in censor_result.scalars().all()}
 
-        return [
-            (censors[cid], similarities[cid])
-            for cid in ids
-            if cid in censors
-        ]
+        return [(censors[cid], similarities[cid]) for cid in ids if cid in censors]
 
     async def _keyword_match(
         self,
@@ -282,9 +265,7 @@ class CensorManager:
             return []
 
         ids = [row.id for row in rows]
-        censor_result = await session.execute(
-            select(Censor).where(Censor.id.in_(ids))
-        )
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
         censors = censor_result.scalars().all()
 
         # Keyword matches get a default similarity of 1.0
@@ -370,9 +351,7 @@ class CensorManager:
             return []
 
         ids = [row.id for row in rows]
-        censor_result = await session.execute(
-            select(Censor).where(Censor.id.in_(ids))
-        )
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
         censors = {c.id: c for c in censor_result.scalars().all()}
 
         return [
@@ -425,9 +404,7 @@ class CensorManager:
             return []
 
         ids = [row.id for row in rows]
-        censor_result = await session.execute(
-            select(Censor).where(Censor.id.in_(ids))
-        )
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
         censors = {c.id: c for c in censor_result.scalars().all()}
 
         return [
@@ -446,9 +423,7 @@ class CensorManager:
     # record_false_positive()
     # ------------------------------------------------------------------
 
-    async def record_false_positive(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def record_false_positive(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
         """Record a false positive trigger."""
         if session is None:
             async with self.db.session() as session:
@@ -457,9 +432,7 @@ class CensorManager:
                 return result
         return await self._record_false_positive(censor_id, session)
 
-    async def _record_false_positive(
-        self, censor_id: UUID, session: AsyncSession
-    ) -> CensorDetail:
+    async def _record_false_positive(self, censor_id: UUID, session: AsyncSession) -> CensorDetail:
         censor = await self._get_censor_orm(censor_id, session)
         if censor is None:
             raise ValueError(f"Censor {censor_id} not found")
@@ -485,9 +458,7 @@ class CensorManager:
     # escalate()
     # ------------------------------------------------------------------
 
-    async def escalate(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> CensorDetail:
+    async def escalate(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
         """Manually escalate censor severity. warn -> block -> absolute. No downgrade."""
         if session is None:
             async with self.db.session() as session:
@@ -496,9 +467,7 @@ class CensorManager:
                 return result
         return await self._escalate(censor_id, session)
 
-    async def _escalate(
-        self, censor_id: UUID, session: AsyncSession
-    ) -> CensorDetail:
+    async def _escalate(self, censor_id: UUID, session: AsyncSession) -> CensorDetail:
         censor = await self._get_censor_orm(censor_id, session)
         if censor is None:
             raise ValueError(f"Censor {censor_id} not found")
@@ -526,27 +495,19 @@ class CensorManager:
     # list_active()
     # ------------------------------------------------------------------
 
-    async def list_active(
-        self, domain: str | None = None, session: AsyncSession | None = None
-    ) -> list[CensorDetail]:
+    async def list_active(self, domain: str | None = None, session: AsyncSession | None = None) -> list[CensorDetail]:
         """List all active censors, optionally filtered by domain."""
         if session is None:
             async with self.db.session() as session:
                 return await self._list_active(domain, session)
         return await self._list_active(domain, session)
 
-    async def _list_active(
-        self, domain: str | None, session: AsyncSession
-    ) -> list[CensorDetail]:
+    async def _list_active(self, domain: str | None, session: AsyncSession) -> list[CensorDetail]:
         stmt = (
-            select(Censor)
-            .where(Censor.agent_id == self.agent_id)
-            .where(Censor.active == True)  # noqa: E712
+            select(Censor).where(Censor.agent_id == self.agent_id).where(Censor.active == True)  # noqa: E712
         )
         if domain is not None:
-            stmt = stmt.where(
-                (Censor.domain == domain) | (Censor.domain.is_(None))
-            )
+            stmt = stmt.where((Censor.domain == domain) | (Censor.domain.is_(None)))
 
         result = await session.execute(stmt)
         censors = result.scalars().all()
@@ -556,9 +517,7 @@ class CensorManager:
     # deactivate()
     # ------------------------------------------------------------------
 
-    async def deactivate(
-        self, censor_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def deactivate(self, censor_id: UUID, session: AsyncSession | None = None) -> None:
         """Deactivate a censor. Set active=false."""
         if session is None:
             async with self.db.session() as session:
@@ -567,9 +526,7 @@ class CensorManager:
                 return
         await self._deactivate(censor_id, session)
 
-    async def _deactivate(
-        self, censor_id: UUID, session: AsyncSession
-    ) -> None:
+    async def _deactivate(self, censor_id: UUID, session: AsyncSession) -> None:
         censor = await self._get_censor_orm(censor_id, session)
         if censor is None:
             raise ValueError(f"Censor {censor_id} not found")
@@ -580,14 +537,10 @@ class CensorManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_censor_orm(
-        self, censor_id: UUID, session: AsyncSession
-    ) -> Censor | None:
+    async def _get_censor_orm(self, censor_id: UUID, session: AsyncSession) -> Censor | None:
         """Fetch Censor ORM scoped by agent_id."""
         result = await session.execute(
-            select(Censor)
-            .where(Censor.id == censor_id)
-            .where(Censor.agent_id == self.agent_id)
+            select(Censor).where(Censor.id == censor_id).where(Censor.agent_id == self.agent_id)
         )
         return result.scalars().first()
 

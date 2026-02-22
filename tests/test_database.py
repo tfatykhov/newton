@@ -26,9 +26,7 @@ async def test_schemas_exist(db):
 async def test_extensions(db):
     """vector and pg_trgm extensions are installed."""
     async with db.engine.connect() as conn:
-        result = await conn.execute(
-            text("SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_trgm')")
-        )
+        result = await conn.execute(text("SELECT extname FROM pg_extension WHERE extname IN ('vector', 'pg_trgm')"))
         extensions = {row[0] for row in result}
     assert extensions == {"vector", "pg_trgm"}
 
@@ -110,10 +108,7 @@ async def test_seed_guardrails(db):
     """4 guardrails exist with correct conditions."""
     async with db.engine.connect() as conn:
         result = await conn.execute(
-            text(
-                "SELECT name, condition, severity FROM brain.guardrails "
-                "WHERE agent_id = 'nous-default' ORDER BY name"
-            )
+            text("SELECT name, condition, severity FROM brain.guardrails WHERE agent_id = 'nous-default' ORDER BY name")
         )
         guardrails = {row[0]: {"condition": row[1], "severity": row[2]} for row in result}
     assert len(guardrails) == 4
@@ -138,9 +133,7 @@ async def test_updated_at_trigger(session):
     await session.commit()
 
     # Get the initial updated_at
-    result = await conn.execute(
-        text("SELECT updated_at FROM nous_system.agents WHERE id = 'test-trigger-agent'")
-    )
+    result = await conn.execute(text("SELECT updated_at FROM nous_system.agents WHERE id = 'test-trigger-agent'"))
     initial_updated_at = result.scalar()
 
     # Wait briefly to ensure timestamp difference
@@ -153,9 +146,7 @@ async def test_updated_at_trigger(session):
     await session.commit()
 
     # Verify updated_at changed
-    result = await conn.execute(
-        text("SELECT updated_at FROM nous_system.agents WHERE id = 'test-trigger-agent'")
-    )
+    result = await conn.execute(text("SELECT updated_at FROM nous_system.agents WHERE id = 'test-trigger-agent'"))
     new_updated_at = result.scalar()
 
     assert new_updated_at > initial_updated_at, (

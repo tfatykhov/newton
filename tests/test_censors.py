@@ -8,7 +8,6 @@ Key MockEmbeddingProvider behavior:
 - Different text = cosine ~0.0 (no match)
 """
 
-
 from sqlalchemy import select
 
 from nous.heart import (
@@ -125,9 +124,7 @@ async def test_activation_count_incremented(heart, session):
     )
 
     # Re-read to check counter
-    updated = await session.execute(
-        select(Censor).where(Censor.id == censor.id)
-    )
+    updated = await session.execute(select(Censor).where(Censor.id == censor.id))
     c = updated.scalar_one()
     assert (c.activation_count or 0) >= 1
 
@@ -317,8 +314,6 @@ async def test_search_read_only(heart, session):
     )
 
     # Re-read to check counter unchanged
-    updated = await session.execute(
-        select(Censor).where(Censor.id == censor.id)
-    )
+    updated = await session.execute(select(Censor).where(Censor.id == censor.id))
     c = updated.scalar_one()
     assert (c.activation_count or 0) == initial_count

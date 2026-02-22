@@ -4,7 +4,6 @@ All tests use real Postgres via the SAVEPOINT fixture from conftest.py.
 Heart methods receive the test session via the session parameter (P1-1).
 """
 
-
 from sqlalchemy import select
 
 from nous.brain.brain import Brain
@@ -126,9 +125,7 @@ async def test_link_decision(heart, db, settings, session):
     await brain.close()
 
     # Link the decision to the episode
-    await heart.link_decision_to_episode(
-        episode.id, decision.id, session=session
-    )
+    await heart.link_decision_to_episode(episode.id, decision.id, session=session)
 
     # Verify the link exists
     result = await session.execute(
@@ -161,9 +158,7 @@ async def test_link_procedure_with_effectiveness(heart, session):
         session=session,
     )
 
-    await heart.link_procedure_to_episode(
-        episode.id, procedure.id, effectiveness="helped", session=session
-    )
+    await heart.link_procedure_to_episode(episode.id, procedure.id, effectiveness="helped", session=session)
 
     result = await session.execute(
         select(EpisodeProcedure).where(
@@ -221,9 +216,7 @@ async def test_search_episodes(heart, session):
         session=session,
     )
 
-    results = await heart.search_episodes(
-        "Migrated PostgreSQL schema to version 3", session=session
-    )
+    results = await heart.search_episodes("Migrated PostgreSQL schema to version 3", session=session)
     assert isinstance(results, list)
     # With mock embeddings, identical text should match
     if results:

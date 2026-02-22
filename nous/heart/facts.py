@@ -39,9 +39,7 @@ class FactManager:
     # Event helper
     # ------------------------------------------------------------------
 
-    async def _emit_event(
-        self, session: AsyncSession, event_type: str, data: dict
-    ) -> None:
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
         """Insert event in same session (P2-1)."""
         event = Event(
             agent_id=self.agent_id,
@@ -164,18 +162,14 @@ class FactManager:
             return None
 
         # Fetch the ORM object
-        fact_result = await session.execute(
-            select(Fact).where(Fact.id == row.id)
-        )
+        fact_result = await session.execute(select(Fact).where(Fact.id == row.id))
         return fact_result.scalars().first()
 
     # ------------------------------------------------------------------
     # confirm()
     # ------------------------------------------------------------------
 
-    async def confirm(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail:
+    async def confirm(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Confirm a fact is still true."""
         if session is None:
             async with self.db.session() as session:
@@ -184,9 +178,7 @@ class FactManager:
                 return result
         return await self._confirm(fact_id, session)
 
-    async def _confirm(
-        self, fact_id: UUID, session: AsyncSession
-    ) -> FactDetail:
+    async def _confirm(self, fact_id: UUID, session: AsyncSession) -> FactDetail:
         fact = await self._get_fact_orm(fact_id, session)
         if fact is None:
             raise ValueError(f"Fact {fact_id} not found")
@@ -268,9 +260,7 @@ class FactManager:
         """Store a fact that contradicts an existing one."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._contradict(
-                    fact_id, contradicting_fact, session
-                )
+                result = await self._contradict(fact_id, contradicting_fact, session)
                 await session.commit()
                 return result
         return await self._contradict(fact_id, contradicting_fact, session)
@@ -308,18 +298,14 @@ class FactManager:
     # get()
     # ------------------------------------------------------------------
 
-    async def get(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail | None:
+    async def get(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail | None:
         """Fetch a single fact."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get(fact_id, session)
         return await self._get(fact_id, session)
 
-    async def _get(
-        self, fact_id: UUID, session: AsyncSession
-    ) -> FactDetail | None:
+    async def _get(self, fact_id: UUID, session: AsyncSession) -> FactDetail | None:
         fact = await self._get_fact_orm(fact_id, session)
         if fact is None:
             return None
@@ -340,9 +326,7 @@ class FactManager:
         """Hybrid search over facts."""
         if session is None:
             async with self.db.session() as session:
-                return await self._search(
-                    query, limit, category, active_only, session
-                )
+                return await self._search(query, limit, category, active_only, session)
         return await self._search(query, limit, category, active_only, session)
 
     async def _search(
@@ -392,9 +376,7 @@ class FactManager:
         ids = [r[0] for r in results]
         scores = {r[0]: r[1] for r in results}
 
-        fact_result = await session.execute(
-            select(Fact).where(Fact.id.in_(ids))
-        )
+        fact_result = await session.execute(select(Fact).where(Fact.id.in_(ids)))
         facts = {f.id: f for f in fact_result.scalars().all()}
 
         return [
@@ -466,9 +448,7 @@ class FactManager:
         ids = [row.id for row in rows]
         scores = {row.id: float(row[1]) for row in rows}
 
-        fact_result = await session.execute(
-            select(Fact).where(Fact.id.in_(ids))
-        )
+        fact_result = await session.execute(select(Fact).where(Fact.id.in_(ids)))
         facts = {f.id: f for f in fact_result.scalars().all()}
 
         return [
@@ -489,18 +469,14 @@ class FactManager:
     # get_current() — P3-5: recursive CTE
     # ------------------------------------------------------------------
 
-    async def get_current(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> FactDetail:
+    async def get_current(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Follow superseded_by chain to find current version of a fact."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get_current(fact_id, session)
         return await self._get_current(fact_id, session)
 
-    async def _get_current(
-        self, fact_id: UUID, session: AsyncSession
-    ) -> FactDetail:
+    async def _get_current(self, fact_id: UUID, session: AsyncSession) -> FactDetail:
         sql = text("""
             WITH RECURSIVE chain AS (
                 SELECT id, superseded_by, 1 AS depth
@@ -515,9 +491,7 @@ class FactManager:
             SELECT id FROM chain WHERE superseded_by IS NULL
         """)
 
-        result = await session.execute(
-            sql, {"start_id": fact_id, "agent_id": self.agent_id}
-        )
+        result = await session.execute(sql, {"start_id": fact_id, "agent_id": self.agent_id})
         row = result.first()
         if row is None:
             raise ValueError(f"Fact {fact_id} not found")
@@ -532,9 +506,7 @@ class FactManager:
     # deactivate()
     # ------------------------------------------------------------------
 
-    async def deactivate(
-        self, fact_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def deactivate(self, fact_id: UUID, session: AsyncSession | None = None) -> None:
         """Soft-delete a fact."""
         if session is None:
             async with self.db.session() as session:
@@ -543,9 +515,7 @@ class FactManager:
                 return
         await self._deactivate(fact_id, session)
 
-    async def _deactivate(
-        self, fact_id: UUID, session: AsyncSession
-    ) -> None:
+    async def _deactivate(self, fact_id: UUID, session: AsyncSession) -> None:
         fact = await self._get_fact_orm(fact_id, session)
         if fact is None:
             raise ValueError(f"Fact {fact_id} not found")
@@ -556,15 +526,9 @@ class FactManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_fact_orm(
-        self, fact_id: UUID, session: AsyncSession
-    ) -> Fact | None:
+    async def _get_fact_orm(self, fact_id: UUID, session: AsyncSession) -> Fact | None:
         """Fetch Fact ORM scoped by agent_id."""
-        result = await session.execute(
-            select(Fact)
-            .where(Fact.id == fact_id)
-            .where(Fact.agent_id == self.agent_id)
-        )
+        result = await session.execute(select(Fact).where(Fact.id == fact_id).where(Fact.agent_id == self.agent_id))
         return result.scalars().first()
 
     def _to_detail(self, fact: Fact) -> FactDetail:

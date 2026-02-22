@@ -34,9 +34,7 @@ class WorkingMemoryManager:
     # get_or_create()
     # ------------------------------------------------------------------
 
-    async def get_or_create(
-        self, session_id: str, session: AsyncSession | None = None
-    ) -> WorkingMemoryState:
+    async def get_or_create(self, session_id: str, session: AsyncSession | None = None) -> WorkingMemoryState:
         """Get existing working memory for session, or create new one."""
         if session is None:
             async with self.db.session() as session:
@@ -45,9 +43,7 @@ class WorkingMemoryManager:
                 return result
         return await self._get_or_create(session_id, session)
 
-    async def _get_or_create(
-        self, session_id: str, session: AsyncSession
-    ) -> WorkingMemoryState:
+    async def _get_or_create(self, session_id: str, session: AsyncSession) -> WorkingMemoryState:
         # UPSERT: INSERT ... ON CONFLICT DO NOTHING
         stmt = (
             pg_insert(WorkingMemory)
@@ -248,9 +244,7 @@ class WorkingMemoryManager:
         """Remove a thread by matching description (case-insensitive contains)."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._resolve_thread(
-                    session_id, description, session
-                )
+                result = await self._resolve_thread(session_id, description, session)
                 await session.commit()
                 return result
         return await self._resolve_thread(session_id, description, session)
@@ -269,10 +263,7 @@ class WorkingMemoryManager:
         desc_lower = description.lower()
 
         # Case-insensitive contains match — remove first match
-        wm.open_threads = [
-            t for t in threads
-            if desc_lower not in (t.get("description", "")).lower()
-        ]
+        wm.open_threads = [t for t in threads if desc_lower not in (t.get("description", "")).lower()]
         await session.flush()
 
         return self._to_state(wm)
@@ -281,18 +272,14 @@ class WorkingMemoryManager:
     # get()
     # ------------------------------------------------------------------
 
-    async def get(
-        self, session_id: str, session: AsyncSession | None = None
-    ) -> WorkingMemoryState | None:
+    async def get(self, session_id: str, session: AsyncSession | None = None) -> WorkingMemoryState | None:
         """Get current working memory state. Returns None if no session exists."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get(session_id, session)
         return await self._get(session_id, session)
 
-    async def _get(
-        self, session_id: str, session: AsyncSession
-    ) -> WorkingMemoryState | None:
+    async def _get(self, session_id: str, session: AsyncSession) -> WorkingMemoryState | None:
         wm = await self._get_wm_orm(session_id, session)
         if wm is None:
             return None
@@ -302,9 +289,7 @@ class WorkingMemoryManager:
     # clear()
     # ------------------------------------------------------------------
 
-    async def clear(
-        self, session_id: str, session: AsyncSession | None = None
-    ) -> None:
+    async def clear(self, session_id: str, session: AsyncSession | None = None) -> None:
         """Clear working memory for session. DELETE the row."""
         if session is None:
             async with self.db.session() as session:
@@ -313,9 +298,7 @@ class WorkingMemoryManager:
                 return
         await self._clear(session_id, session)
 
-    async def _clear(
-        self, session_id: str, session: AsyncSession
-    ) -> None:
+    async def _clear(self, session_id: str, session: AsyncSession) -> None:
         wm = await self._get_wm_orm(session_id, session)
         if wm is not None:
             await session.delete(wm)
@@ -325,9 +308,7 @@ class WorkingMemoryManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_wm_orm(
-        self, session_id: str, session: AsyncSession
-    ) -> WorkingMemory | None:
+    async def _get_wm_orm(self, session_id: str, session: AsyncSession) -> WorkingMemory | None:
         """Fetch WorkingMemory ORM without locking."""
         result = await session.execute(
             select(WorkingMemory)
@@ -336,9 +317,7 @@ class WorkingMemoryManager:
         )
         return result.scalars().first()
 
-    async def _get_wm_orm_for_update(
-        self, session_id: str, session: AsyncSession
-    ) -> WorkingMemory | None:
+    async def _get_wm_orm_for_update(self, session_id: str, session: AsyncSession) -> WorkingMemory | None:
         """P2-8: Fetch WorkingMemory ORM with FOR UPDATE lock."""
         result = await session.execute(
             select(WorkingMemory)

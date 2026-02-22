@@ -150,9 +150,7 @@ async def test_evict_specific(heart, session):
     await heart.load_to_working_memory(sid, item1, session=session)
     await heart.load_to_working_memory(sid, item2, session=session)
 
-    state = await heart.evict_from_working_memory(
-        sid, ref_id=target_ref, session=session
-    )
+    state = await heart.evict_from_working_memory(sid, ref_id=target_ref, session=session)
 
     assert state.item_count == 1
     assert state.items[0].summary == "Keep this"
@@ -175,9 +173,7 @@ async def test_add_thread(heart, session):
         priority="high",
         created_at=datetime.now(UTC),
     )
-    state = await heart.working_memory.add_thread(
-        sid, thread, session=session
-    )
+    state = await heart.working_memory.add_thread(sid, thread, session=session)
 
     assert len(state.open_threads) == 1
     assert state.open_threads[0].description == "Investigate memory leak"
@@ -209,9 +205,7 @@ async def test_resolve_thread(heart, session):
     await heart.working_memory.add_thread(sid, thread2, session=session)
 
     # Resolve by matching description (case-insensitive contains)
-    state = await heart.working_memory.resolve_thread(
-        sid, "login bug", session=session
-    )
+    state = await heart.working_memory.resolve_thread(sid, "login bug", session=session)
 
     assert len(state.open_threads) == 1
     assert state.open_threads[0].description == "Review PR #42"

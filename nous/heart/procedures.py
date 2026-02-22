@@ -39,9 +39,7 @@ class ProcedureManager:
     # Event helper
     # ------------------------------------------------------------------
 
-    async def _emit_event(
-        self, session: AsyncSession, event_type: str, data: dict
-    ) -> None:
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
         """Insert event in same session (P2-1)."""
         event = Event(
             agent_id=self.agent_id,
@@ -54,9 +52,7 @@ class ProcedureManager:
     # store()
     # ------------------------------------------------------------------
 
-    async def store(
-        self, input: ProcedureInput, session: AsyncSession | None = None
-    ) -> ProcedureDetail:
+    async def store(self, input: ProcedureInput, session: AsyncSession | None = None) -> ProcedureDetail:
         """Store a new procedure."""
         if session is None:
             async with self.db.session() as session:
@@ -65,16 +61,11 @@ class ProcedureManager:
                 return result
         return await self._store(input, session)
 
-    async def _store(
-        self, input: ProcedureInput, session: AsyncSession
-    ) -> ProcedureDetail:
+    async def _store(self, input: ProcedureInput, session: AsyncSession) -> ProcedureDetail:
         # Generate embedding from name + description + core_patterns
         embedding = None
         if self.embeddings:
-            embed_text = (
-                f"{input.name} {input.description or ''} "
-                f"{' '.join(input.core_patterns)}"
-            ).strip()
+            embed_text = (f"{input.name} {input.description or ''} {' '.join(input.core_patterns)}").strip()
             try:
                 embedding = await self.embeddings.embed(embed_text)
             except Exception:
@@ -102,9 +93,7 @@ class ProcedureManager:
     # activate()
     # ------------------------------------------------------------------
 
-    async def activate(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> ProcedureDetail:
+    async def activate(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail:
         """Mark a procedure as activated."""
         if session is None:
             async with self.db.session() as session:
@@ -113,9 +102,7 @@ class ProcedureManager:
                 return result
         return await self._activate(procedure_id, session)
 
-    async def _activate(
-        self, procedure_id: UUID, session: AsyncSession
-    ) -> ProcedureDetail:
+    async def _activate(self, procedure_id: UUID, session: AsyncSession) -> ProcedureDetail:
         procedure = await self._get_procedure_orm(procedure_id, session)
         if procedure is None:
             raise ValueError(f"Procedure {procedure_id} not found")
@@ -154,9 +141,7 @@ class ProcedureManager:
         self, procedure_id: UUID, outcome: ProcedureOutcome, session: AsyncSession
     ) -> ProcedureDetail:
         if outcome not in self._VALID_OUTCOMES:
-            raise ValueError(
-                f"Invalid outcome {outcome!r}; must be one of {sorted(self._VALID_OUTCOMES)}"
-            )
+            raise ValueError(f"Invalid outcome {outcome!r}; must be one of {sorted(self._VALID_OUTCOMES)}")
 
         procedure = await self._get_procedure_orm(procedure_id, session)
         if procedure is None:
@@ -184,18 +169,14 @@ class ProcedureManager:
     # get()
     # ------------------------------------------------------------------
 
-    async def get(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> ProcedureDetail | None:
+    async def get(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail | None:
         """Fetch procedure with computed effectiveness."""
         if session is None:
             async with self.db.session() as session:
                 return await self._get(procedure_id, session)
         return await self._get(procedure_id, session)
 
-    async def _get(
-        self, procedure_id: UUID, session: AsyncSession
-    ) -> ProcedureDetail | None:
+    async def _get(self, procedure_id: UUID, session: AsyncSession) -> ProcedureDetail | None:
         procedure = await self._get_procedure_orm(procedure_id, session)
         if procedure is None:
             return None
@@ -255,9 +236,7 @@ class ProcedureManager:
         ids = [r[0] for r in results]
         scores = {r[0]: r[1] for r in results}
 
-        proc_result = await session.execute(
-            select(Procedure).where(Procedure.id.in_(ids))
-        )
+        proc_result = await session.execute(select(Procedure).where(Procedure.id.in_(ids)))
         procedures = {p.id: p for p in proc_result.scalars().all()}
 
         return [
@@ -277,9 +256,7 @@ class ProcedureManager:
     # retire()
     # ------------------------------------------------------------------
 
-    async def retire(
-        self, procedure_id: UUID, session: AsyncSession | None = None
-    ) -> None:
+    async def retire(self, procedure_id: UUID, session: AsyncSession | None = None) -> None:
         """Retire a procedure (set active=false)."""
         if session is None:
             async with self.db.session() as session:
@@ -288,9 +265,7 @@ class ProcedureManager:
                 return
         await self._retire(procedure_id, session)
 
-    async def _retire(
-        self, procedure_id: UUID, session: AsyncSession
-    ) -> None:
+    async def _retire(self, procedure_id: UUID, session: AsyncSession) -> None:
         procedure = await self._get_procedure_orm(procedure_id, session)
         if procedure is None:
             raise ValueError(f"Procedure {procedure_id} not found")
@@ -301,14 +276,10 @@ class ProcedureManager:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def _get_procedure_orm(
-        self, procedure_id: UUID, session: AsyncSession
-    ) -> Procedure | None:
+    async def _get_procedure_orm(self, procedure_id: UUID, session: AsyncSession) -> Procedure | None:
         """Fetch Procedure ORM scoped by agent_id."""
         result = await session.execute(
-            select(Procedure)
-            .where(Procedure.id == procedure_id)
-            .where(Procedure.agent_id == self.agent_id)
+            select(Procedure).where(Procedure.id == procedure_id).where(Procedure.agent_id == self.agent_id)
         )
         return result.scalars().first()
 
