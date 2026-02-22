@@ -116,18 +116,24 @@ class GuardrailEngine:
         """Evaluate all conditions in a guardrail (AND logic).
 
         All conditions must match for the guardrail to trigger.
+        A guardrail with only unknown condition keys does NOT match.
         """
+        any_recognized = False
         for key, value in condition.items():
             if key == "stakes":
+                any_recognized = True
                 if stakes != value:
                     return False
             elif key == "confidence_lt":
+                any_recognized = True
                 if confidence >= value:
                     return False
             elif key == "reason_count_lt":
+                any_recognized = True
                 if len(reasons) >= value:
                     return False
             elif key == "quality_lt":
+                any_recognized = True
                 if quality_score is not None and quality_score >= value:
                     return False
                 # If quality_score is None, treat as matching (no quality = low quality)
@@ -138,4 +144,4 @@ class GuardrailEngine:
                 logger.warning("Unknown guardrail condition key: %s", key)
                 continue
 
-        return True
+        return any_recognized

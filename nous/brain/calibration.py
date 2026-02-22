@@ -112,23 +112,36 @@ class CalibrationEngine:
             }
 
         # --- Per-reason-type breakdown ---
+        # Use a subquery to deduplicate: one row per (decision, reason_type)
+        # so a decision with N reasons of the same type only contributes its
+        # Brier error once per type.
         reason_brier = func.power(
             Decision.confidence - outcome_binary, 2
         )
 
-        reason_result = await session.execute(
+        deduped = (
             select(
-                DecisionReason.type,
-                func.count(func.distinct(Decision.id)).label("count"),
-                func.avg(reason_brier).label("brier_score"),
+                DecisionReason.type.label("reason_type"),
+                Decision.id.label("decision_id"),
+                reason_brier.label("brier"),
             )
             .join(DecisionReason, DecisionReason.decision_id == Decision.id)
             .where(reviewed_filter)
-            .group_by(DecisionReason.type)
+            .group_by(DecisionReason.type, Decision.id, Decision.confidence, Decision.outcome)
+            .subquery()
+        )
+
+        reason_result = await session.execute(
+            select(
+                deduped.c.reason_type,
+                func.count().label("count"),
+                func.avg(deduped.c.brier).label("brier_score"),
+            )
+            .group_by(deduped.c.reason_type)
         )
         reason_type_stats = {}
         for row in reason_result:
-            reason_type_stats[row.type] = {
+            reason_type_stats[row.reason_type] = {
                 "count": row.count,
                 "brier_score": (
                     float(row.brier_score) if row.brier_score is not None else None

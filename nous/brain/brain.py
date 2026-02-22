@@ -885,7 +885,10 @@ class Brain:
     async def _get_decision_orm(
         self, decision_id: UUID, session: AsyncSession
     ) -> Decision | None:
-        """Fetch a Decision ORM object with all relationships eagerly loaded."""
+        """Fetch a Decision ORM object with all relationships eagerly loaded.
+
+        Scoped by agent_id to enforce multi-agent data isolation.
+        """
         result = await session.execute(
             select(Decision)
             .options(
@@ -895,6 +898,7 @@ class Brain:
                 selectinload(Decision.thoughts),
             )
             .where(Decision.id == decision_id)
+            .where(Decision.agent_id == self.agent_id)
         )
         return result.scalars().first()
 
