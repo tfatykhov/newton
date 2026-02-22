@@ -1,4 +1,4 @@
-# Newton Feature Index
+# Nous Feature Index
 
 ## v0.1.0 — "The Thinking Agent"
 
@@ -7,7 +7,7 @@
 |---------|------|--------|-------------|
 | F001 | [Brain Module](F001-brain-module.md) | Planned | Decision intelligence — recording, deliberation, calibration, guardrails, graph |
 | F002 | [Heart Module](F002-heart-module.md) | Planned | Memory system — episodic, semantic, procedural, working, censors |
-| F003 | [Cognitive Layer](F003-cognitive-layer.md) | Planned | The Newton Loop — frames, recall, deliberation, monitoring |
+| F003 | [Cognitive Layer](F003-cognitive-layer.md) | Planned | The Nous Loop — frames, recall, deliberation, monitoring |
 | F004 | [Runtime](F004-runtime.md) | Planned | Docker container, REST API, MCP interface, project structure |
 | F005 | [Context Engine](F005-context-engine.md) | Planned | Frame-adaptive context assembly with token budgets and 3-tier summarization |
 | F006 | [Event Bus](F006-event-bus.md) | Planned | In-process async event bus, 7 automated handlers, 27/29 actions automatic |
@@ -25,15 +25,15 @@
 | F010 | Frame Splitting | Parallel cognitive frames via sub-agents |
 | F011 | Model Router | LLM portability via proxy layer |
 | F012 | Growth Engine | Administrative self-improvement (Papert's Principle) |
-| F013 | Multi-Agent | Newton agents sharing knowledge |
+| F013 | Multi-Agent | Nous agents sharing knowledge |
 | F014 | Dashboard | Visual growth tracking and cognitive state |
 
 ## Research Notes
 
 | # | Title | Key Topic |
 |---|-------|-----------|
-| [001](../research/001-foundations.md) | Foundations | Problem statement, Newton hypothesis |
-| [002](../research/002-minsky-mapping.md) | Minsky Mapping | 14 chapters → Newton components |
+| [001](../research/001-foundations.md) | Foundations | Problem statement, Nous hypothesis |
+| [002](../research/002-minsky-mapping.md) | Minsky Mapping | 14 chapters → Nous components |
 | [003](../research/003-runtime-decision.md) | Runtime Decision | Claude Agent SDK + model router |
 | [004](../research/004-storage-architecture.md) | Storage Architecture | Postgres + pgvector, swappable backends |
 | [005](../research/005-cognitive-layer.md) | Cognitive Layer | The seven systems |
@@ -49,7 +49,7 @@
 
 ```
 ┌──────────────────────────────────────────────┐
-│              Newton Agent (F004)              │
+│              Nous Agent (F004)              │
 │                                               │
 │  ┌──────────────────────────────────────┐    │
 │  │      Cognitive Layer (F003)           │    │

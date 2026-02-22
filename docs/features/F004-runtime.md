@@ -6,13 +6,13 @@
 
 ## Summary
 
-The Newton runtime is a Docker container that packages Brain, Heart, Cognitive Layer, and Claude Agent SDK into a runnable agent. One `docker compose up` gives you a thinking agent with persistent memory.
+The Nous runtime is a Docker container that packages Brain, Heart, Cognitive Layer, and Claude Agent SDK into a runnable agent. One `docker compose up` gives you a thinking agent with persistent memory.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                Newton Container                  │
+│                Nous Container                  │
 │                                                  │
 │  ┌────────────────────────────────────────────┐  │
 │  │          Claude Agent SDK                   │  │
@@ -50,16 +50,16 @@ The Newton runtime is a Docker container that packages Brain, Heart, Cognitive L
 version: "3.8"
 
 services:
-  newton:
+  nous:
     build: .
     ports:
       - "8000:8000"           # REST API
       - "8001:8001"           # MCP endpoint (external)
     environment:
-      - NEWTON_DB_URL=postgresql://newton:${DB_PASSWORD}@postgres:5432/newton
+      - NOUS_DB_URL=postgresql://nous:${DB_PASSWORD}@postgres:5432/nous
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - NEWTON_AGENT_ID=default
-      - NEWTON_LOG_LEVEL=info
+      - NOUS_AGENT_ID=default
+      - NOUS_LOG_LEVEL=info
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,8 +69,8 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: newton
-      POSTGRES_USER: newton
+      POSTGRES_DB: nous
+      POSTGRES_USER: nous
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -78,7 +78,7 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U newton"]
+      test: ["CMD-SHELL", "pg_isready -U nous"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -88,7 +88,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - NEWTON_DB_URL=postgresql://newton:${DB_PASSWORD}@postgres:5432/newton
+      - NOUS_DB_URL=postgresql://nous:${DB_PASSWORD}@postgres:5432/nous
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,8 +101,8 @@ volumes:
 
 ```bash
 # Clone
-git clone https://github.com/tfatykhov/newton.git
-cd newton
+git clone https://github.com/tfatykhov/nous.git
+cd nous
 
 # Configure
 cp .env.example .env
@@ -114,7 +114,7 @@ docker compose up -d
 # Talk to your agent
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Hello Newton"}'
+  -d '{"message": "Hello Nous"}'
 ```
 
 ## REST API
@@ -133,25 +133,25 @@ WS   /ws               — WebSocket for real-time chat
 
 ## MCP Interface (External)
 
-For other agents or tools to interact with Newton:
+For other agents or tools to interact with Nous:
 
 ```
 Tools exposed:
-- newton.chat          — Send a message to the agent
-- newton.recall        — Search Newton's memory
-- newton.status        — Get agent status
-- newton.teach         — Add a fact or procedure
+- nous.chat          — Send a message to the agent
+- nous.recall        — Search Nous's memory
+- nous.status        — Get agent status
+- nous.teach         — Add a fact or procedure
 ```
 
-This is how Newton could participate in multi-agent systems — other agents talk to it via MCP.
+This is how Nous could participate in multi-agent systems — other agents talk to it via MCP.
 
 ## Configuration
 
 ```yaml
 # config/agent.yaml
 agent:
-  id: "newton-1"
-  name: "Newton"
+  id: "nous-1"
+  name: "Nous"
   
 identity:
   description: "A thinking agent that learns from experience"
@@ -197,7 +197,7 @@ COPY pyproject.toml .
 RUN pip install -e .
 
 # Copy source
-COPY newton/ newton/
+COPY nous/ nous/
 COPY config/ config/
 
 # Health check
@@ -206,13 +206,13 @@ HEALTHCHECK --interval=30s --timeout=10s \
 
 EXPOSE 8000 8001
 
-CMD ["python", "-m", "newton.main"]
+CMD ["python", "-m", "nous.main"]
 ```
 
 ## Project Structure
 
 ```
-newton/
+nous/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── .env.example
@@ -220,7 +220,7 @@ newton/
 ├── pyproject.toml
 ├── config/
 │   └── agent.yaml              # Agent configuration
-├── newton/
+├── nous/
 │   ├── __init__.py
 │   ├── main.py                 # Entry point
 │   ├── brain/

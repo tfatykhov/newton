@@ -1,16 +1,16 @@
-# Newton
+# Nous
 
 **A cognitive architecture for AI agents, grounded in Minsky's Society of Mind.**
 
-Newton is a framework for building AI agents that think, learn, and grow — not just respond. It uses [Cognition Engines](https://github.com/tfatykhov/cognition-agent-decisions) as its decision memory core, and implements Marvin Minsky's Society of Mind principles as first-class architectural components.
+Nous is a framework for building AI agents that think, learn, and grow — not just respond. It uses [Cognition Engines](https://github.com/tfatykhov/cognition-agent-decisions) as its decision memory core, and implements Marvin Minsky's Society of Mind principles as first-class architectural components.
 
 > *"To explain the mind, we have to show how minds are built from mindless stuff."* — Marvin Minsky
 
-## Why Newton?
+## Why Nous?
 
 Current AI agents are stateless reactors. They receive a prompt, generate a response, and forget. Even agents with "memory" just store and retrieve text — there's no structure, no learning, no growth.
 
-Newton is different. It gives agents:
+Nous is different. It gives agents:
 
 - **Structured memory** that mirrors how minds actually work (not just vector search)
 - **Decision intelligence** that learns from past choices and calibrates confidence
@@ -21,7 +21,7 @@ Newton is different. It gives agents:
 
 ```mermaid
 graph TB
-    subgraph "Newton Agent"
+    subgraph "Nous Agent"
         A[Stimulus] --> B[Frame Selection]
         B --> C[K-Line Activation]
         C --> D[Pre-Action Protocol]
@@ -51,7 +51,7 @@ graph TB
 
 ### From Minsky
 
-| Concept | Chapter | Newton Implementation |
+| Concept | Chapter | Nous Implementation |
 |---------|---------|----------------------|
 | K-Lines | Ch 8 | Context bundles with level-bands (upper fringe / core / lower fringe) |
 | Censors | Ch 9 | Guardrails that block actions, not modify them |
@@ -66,7 +66,7 @@ graph TB
 
 ### From Cognition Engines
 
-| Component | Role in Newton |
+| Component | Role in Nous |
 |-----------|---------------|
 | Decision Memory | Long-term episodic memory for all agent choices |
 | Pre-Action Protocol | Mandatory think-before-acting loop |
@@ -76,7 +76,7 @@ graph TB
 | Bridge Definitions | Structure + function descriptions for semantic recall |
 | Graph Store | Decision relationships and dependency tracking |
 
-## The Newton Loop
+## The Nous Loop
 
 Every agent action follows this cycle:
 
@@ -167,7 +167,7 @@ graph TB
 
 ## Growth Model
 
-Newton agents grow through **Papert's Principle**: the most crucial steps in mental growth are based on acquiring new administrative ways to use what one already knows.
+Nous agents grow through **Papert's Principle**: the most crucial steps in mental growth are based on acquiring new administrative ways to use what one already knows.
 
 This means:
 - **Don't add more knowledge** when an agent fails — add a better manager
@@ -191,11 +191,11 @@ graph LR
     L4 -->|add administrative growth| L5
 ```
 
-Most AI agents operate at Level 1-2. Newton targets Level 5.
+Most AI agents operate at Level 1-2. Nous targets Level 5.
 
 ## Confidence & Calibration
 
-Newton agents track their confidence and learn from it:
+Nous agents track their confidence and learn from it:
 
 - Every decision records a confidence score (0.0 - 1.0)
 - Outcomes are reviewed and compared to predictions
@@ -206,7 +206,7 @@ Newton agents track their confidence and learn from it:
 
 ## Frame-Splitting Protocol
 
-For important decisions, Newton supports **parallel cognitive frames** via sub-agents:
+For important decisions, Nous supports **parallel cognitive frames** via sub-agents:
 
 ```mermaid
 graph TB
@@ -223,15 +223,15 @@ Each sub-agent is locked into a single interpretive frame. The main agent synthe
 
 ## Relationship to Cognition Engines
 
-Newton applies the same decision intelligence principles proven by [Cognition Engines](https://github.com/tfatykhov/cognition-agent-decisions) — decisions, deliberation traces, calibration, guardrails, bridge definitions — but is a completely independent implementation.
+Nous applies the same decision intelligence principles proven by [Cognition Engines](https://github.com/tfatykhov/cognition-agent-decisions) — decisions, deliberation traces, calibration, guardrails, bridge definitions — but is a completely independent implementation.
 
 **Same ideas, not same code.**
 
-Cognition Engines is a standalone server for any AI agent that needs decision memory. Newton's Brain module is a purpose-built embedded implementation of those principles, optimized for in-process use with zero network overhead.
+Cognition Engines is a standalone server for any AI agent that needs decision memory. Nous's Brain module is a purpose-built embedded implementation of those principles, optimized for in-process use with zero network overhead.
 
 ```
 Cognition Engines  →  proved the ideas work (standalone server, MCP/JSON-RPC)
-Newton Brain       →  applies those ideas as an embedded organ (Python library, Postgres)
+Nous Brain       →  applies those ideas as an embedded organ (Python library, Postgres)
 ```
 
 Both projects evolve independently. The shared asset is the philosophy, not the codebase.

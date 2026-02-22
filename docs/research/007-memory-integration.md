@@ -1,6 +1,6 @@
 # Research Note 007: Memory Architecture & CE Integration
 
-*How does a Newton agent remember, and where does Cognition Engines fit?*
+*How does a Nous agent remember, and where does Cognition Engines fit?*
 
 ## The Problem
 
@@ -10,17 +10,17 @@ A mind needs different kinds of memory. Humans have:
 - **Procedural** — How to do things (skills, habits)
 - **Working** — What I'm focused on right now
 
-Cognition Engines handles **decisions** brilliantly — but decisions are just one slice of memory. Newton needs ALL of these, organized and searchable.
+Cognition Engines handles **decisions** brilliantly — but decisions are just one slice of memory. Nous needs ALL of these, organized and searchable.
 
 ## Memory Architecture
 
 ```mermaid
 graph TB
-    subgraph "Newton Agent"
+    subgraph "Nous Agent"
         AGENT[Agent Runtime]
     end
 
-    subgraph "Memory Manager (Newton)"
+    subgraph "Memory Manager (Nous)"
         MM[Memory Manager<br/>Unified API]
         MM --> |read/write| EP[Episodic Store]
         MM --> |read/write| SM[Semantic Store]
@@ -55,7 +55,7 @@ graph TB
 
 **CE handles:** Recording, querying, calibration, guardrails, graph relationships.
 
-**Newton's role:** Consumer, not producer. Newton triggers decisions through CE's MCP API and reads results back.
+**Nous's role:** Consumer, not producer. Nous triggers decisions through CE's MCP API and reads results back.
 
 **Schema:** CE's existing tables (in `ce` schema)
 
@@ -68,7 +68,7 @@ ce.deliberation     — Thought traces
 ce.graph_edges      — Decision relationships
 ```
 
-**Newton reads from CE via MCP:**
+**Nous reads from CE via MCP:**
 ```python
 # Query past decisions
 results = await mcp.call("pre_action", {
@@ -90,22 +90,22 @@ await mcp.call("review_outcome", {
 })
 ```
 
-**Key principle:** Newton never writes directly to CE's tables. All decision operations go through CE's API. Clean boundary.
+**Key principle:** Nous never writes directly to CE's tables. All decision operations go through CE's API. Clean boundary.
 
 ---
 
-### 2. Episodic Memory (Owned by Newton)
+### 2. Episodic Memory (Owned by Nous)
 
 **What:** What happened during interactions. Not decisions — experiences. The narrative of "what went on."
 
 **Examples:**
-- "Had a conversation about Newton architecture with Tim"
+- "Had a conversation about Nous architecture with Tim"
 - "Debugged a SQLite migration issue for 45 minutes"
 - "Read Minsky Chapter 10 and extracted 3 insights"
 
 **Schema:**
 ```sql
-CREATE TABLE newton.episodes (
+CREATE TABLE nous.episodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(100) NOT NULL,
     title VARCHAR(500),
@@ -136,13 +136,13 @@ CREATE TABLE newton.episodes (
 );
 ```
 
-**Auto-generated:** Newton creates episode records at the end of each interaction or task. Summarized by the LLM.
+**Auto-generated:** Nous creates episode records at the end of each interaction or task. Summarized by the LLM.
 
 **Recall:** "What happened when I worked on X?" → semantic search over episodes.
 
 ---
 
-### 3. Semantic Memory (Owned by Newton)
+### 3. Semantic Memory (Owned by Nous)
 
 **What:** Facts, preferences, knowledge. Things that are true (or believed true) independent of when they were learned.
 
@@ -154,7 +154,7 @@ CREATE TABLE newton.episodes (
 
 **Schema:**
 ```sql
-CREATE TABLE newton.facts (
+CREATE TABLE nous.facts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(100) NOT NULL,
     content TEXT NOT NULL,
@@ -191,7 +191,7 @@ CREATE TABLE newton.facts (
 
 ---
 
-### 4. Procedural Memory (Owned by Newton)
+### 4. Procedural Memory (Owned by Nous)
 
 **What:** How to do things. Patterns, methods, recipes. Not what happened (episodic) or what's true (semantic) — but how to act.
 
@@ -204,7 +204,7 @@ CREATE TABLE newton.facts (
 
 **Schema:**
 ```sql
-CREATE TABLE newton.procedures (
+CREATE TABLE nous.procedures (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(100) NOT NULL,
     name VARCHAR(500) NOT NULL,
@@ -246,19 +246,19 @@ CREATE TABLE newton.procedures (
 
 ---
 
-### 5. Working Memory (Owned by Newton)
+### 5. Working Memory (Owned by Nous)
 
 **What:** The agent's current focus. What's in the "mental workspace" right now. Cleared between sessions (or persisted for continuity).
 
 **Examples:**
-- Currently working on: Newton v0.1.0 feature spec
+- Currently working on: Nous v0.1.0 feature spec
 - Active frame: architecture decision
-- Loaded K-lines: newton-architecture, postgres-patterns
+- Loaded K-lines: nous-architecture, postgres-patterns
 - Open threads: waiting for Tim's feedback on storage
 
 **Schema:**
 ```sql
-CREATE TABLE newton.working_memory (
+CREATE TABLE nous.working_memory (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(100) NOT NULL,
     session_id VARCHAR(100),
@@ -292,30 +292,30 @@ CREATE TABLE newton.working_memory (
 ```mermaid
 sequenceDiagram
     participant User
-    participant Newton
+    participant Nous
     participant WM as Working Memory
     participant SM as Semantic Memory
     participant EM as Episodic Memory
     participant CE as Cognition Engines
 
-    User->>Newton: "What happened with the SQLite migration?"
+    User->>Nous: "What happened with the SQLite migration?"
     
-    Newton->>Newton: Frame Selection → "question" frame
+    Nous->>Nous: Frame Selection → "question" frame
     
-    Newton->>EM: Search episodes: "SQLite migration"
-    EM-->>Newton: Episode: "Migrated CE from YAML to SQLite, 3 hours"
+    Nous->>EM: Search episodes: "SQLite migration"
+    EM-->>Nous: Episode: "Migrated CE from YAML to SQLite, 3 hours"
     
-    Newton->>CE: Query decisions: "SQLite migration"
-    CE-->>Newton: Decision #162: "Use SQLite for CE storage" (success)
-    CE-->>Newton: Decision #165: "Migration script with upserts" (success)
+    Nous->>CE: Query decisions: "SQLite migration"
+    CE-->>Nous: Decision #162: "Use SQLite for CE storage" (success)
+    CE-->>Nous: Decision #165: "Migration script with upserts" (success)
     
-    Newton->>SM: Search facts: "SQLite"
-    SM-->>Newton: Fact: "SQLite WAL mode for concurrent reads"
-    SM-->>Newton: Fact: "queryDecisions 8.5x faster after migration"
+    Nous->>SM: Search facts: "SQLite"
+    SM-->>Nous: Fact: "SQLite WAL mode for concurrent reads"
+    SM-->>Nous: Fact: "queryDecisions 8.5x faster after migration"
     
-    Newton->>WM: Load all results into working memory
+    Nous->>WM: Load all results into working memory
     
-    Newton->>User: Comprehensive answer with episodes + decisions + facts
+    Nous->>User: Comprehensive answer with episodes + decisions + facts
 ```
 
 ### Example: Agent makes a decision
@@ -323,33 +323,33 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant User
-    participant Newton
+    participant Nous
     participant WM as Working Memory
     participant PM as Procedural Memory
     participant CE as Cognition Engines
     participant CM as Censor Memory
 
-    User->>Newton: "Should we add Redis for caching?"
+    User->>Nous: "Should we add Redis for caching?"
     
-    Newton->>Newton: Frame Selection → "decision" frame
+    Nous->>Nous: Frame Selection → "decision" frame
     
-    Newton->>PM: Activate procedure: "architecture-decision"
-    PM-->>Newton: Core: query past, check constraints, record intent
+    Nous->>PM: Activate procedure: "architecture-decision"
+    PM-->>Nous: Core: query past, check constraints, record intent
     
-    Newton->>CE: pre_action("Adding Redis for caching")
-    CE-->>Newton: Similar: Decision #147 (Postgres for storage, success)
-    CE-->>Newton: Decision ID: abc123 (recorded intent)
+    Nous->>CE: pre_action("Adding Redis for caching")
+    CE-->>Nous: Similar: Decision #147 (Postgres for storage, success)
+    CE-->>Nous: Decision ID: abc123 (recorded intent)
     
-    Newton->>CM: Check censors for "add new infrastructure"
-    CM-->>Newton: No blocks
+    Nous->>CM: Check censors for "add new infrastructure"
+    CM-->>Nous: No blocks
     
-    Newton->>CE: record_thought(abc123, "Redis adds operational complexity...")
-    Newton->>CE: record_thought(abc123, "But Postgres can cache via UNLOGGED tables...")
+    Nous->>CE: record_thought(abc123, "Redis adds operational complexity...")
+    Nous->>CE: record_thought(abc123, "But Postgres can cache via UNLOGGED tables...")
     
-    Newton->>User: Recommendation with reasoning
+    Nous->>User: Recommendation with reasoning
     
-    Newton->>CE: update_decision(abc123, final_decision)
-    Newton->>WM: Store as open thread (awaiting outcome)
+    Nous->>CE: update_decision(abc123, final_decision)
+    Nous->>WM: Store as open thread (awaiting outcome)
 ```
 
 ## Censor Memory (Subset of Procedural)
@@ -357,7 +357,7 @@ sequenceDiagram
 Censors are stored alongside procedures but have a special role:
 
 ```sql
-CREATE TABLE newton.censors (
+CREATE TABLE nous.censors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(100) NOT NULL,
     
@@ -388,7 +388,7 @@ CREATE TABLE newton.censors (
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Newton Agent                      │
+│                    Nous Agent                      │
 │                                                      │
 │  ┌──────────────┐    ┌──────────────────────────┐   │
 │  │ Memory       │    │ Cognition Engines (MCP)   │   │
@@ -405,7 +405,7 @@ CREATE TABLE newton.censors (
 │  ┌──────────────────────────────────────────────┐   │
 │  │         PostgreSQL + pgvector                 │   │
 │  │                                               │   │
-│  │  newton schema          │  ce schema          │   │
+│  │  nous schema          │  ce schema          │   │
 │  │  • episodes             │  • decisions        │   │
 │  │  • facts                │  • tags             │   │
 │  │  • procedures           │  • reasons          │   │
@@ -417,10 +417,10 @@ CREATE TABLE newton.censors (
 ```
 
 **Rules:**
-1. Newton NEVER writes to `ce` schema directly
-2. CE NEVER reads from `newton` schema
+1. Nous NEVER writes to `ce` schema directly
+2. CE NEVER reads from `nous` schema
 3. Both share the same Postgres instance for operational simplicity
-4. Cross-references use IDs (newton stores CE decision IDs as strings, not foreign keys)
+4. Cross-references use IDs (nous stores CE decision IDs as strings, not foreign keys)
 5. Either system can be replaced independently
 
 ## Unified Search
@@ -445,10 +445,10 @@ class MemoryManager:
         """
         results = []
         
-        # Search Newton's stores
+        # Search Nous's stores
         if types is None or any(t in types for t in ["episode", "fact", "procedure", "censor"]):
-            newton_results = await self.store.search(query, type_filter=types, limit=limit)
-            results.extend(newton_results)
+            nous_results = await self.store.search(query, type_filter=types, limit=limit)
+            results.extend(nous_results)
         
         # Search CE decisions
         if types is None or "decision" in types:
@@ -517,7 +517,7 @@ graph LR
     PR -->|ineffective| CN
 ```
 
-**Auto-extraction:** After each episode, Newton extracts:
+**Auto-extraction:** After each episode, Nous extracts:
 - Facts mentioned (→ semantic store, checked for duplicates)
 - Procedures used (→ update activation counts)
 - Decisions made (→ already in CE)

@@ -4,7 +4,7 @@
 
 ## The Problem
 
-An LLM's context window is finite and expensive. A Newton agent accumulates thousands of memories over time. The challenge isn't storage — it's **selection and compression**. What goes into context for this specific interaction?
+An LLM's context window is finite and expensive. A Nous agent accumulates thousands of memories over time. The challenge isn't storage — it's **selection and compression**. What goes into context for this specific interaction?
 
 ```
 Agent has:          Context window fits:
@@ -79,7 +79,7 @@ Every memory type needs multiple representations at different detail levels:
 
 ### Summary (~50-100 tokens) — for context loading
 ```
-"Decision: Chose Postgres + pgvector as Newton's storage backend.
+"Decision: Chose Postgres + pgvector as Nous's storage backend.
 Reasons: Unifies structured + vector data, cloud-native, one backup target.
 Outcome: Success. Query performance 8.5x faster than SQLite."
 ```
@@ -322,7 +322,7 @@ def assemble_context(layers: dict[str, list[ContextItem]]) -> str:
 
 ## Example: Context Assembly in Action
 
-**User asks:** "Should we use Redis for caching in Newton?"
+**User asks:** "Should we use Redis for caching in Nous?"
 
 **Frame selected:** `decision` (priorities: decisions=1.0, procedures=0.8, facts=0.6, episodes=0.4)
 
@@ -336,7 +336,7 @@ def assemble_context(layers: dict[str, list[ContextItem]]) -> str:
 
 ```
 ## Identity
-Newton agent. Analytical, cautious, curious.
+Nous agent. Analytical, cautious, curious.
 
 ## Active Constraints
 - BLOCK: Don't add infrastructure without evaluating operational cost — learned from over-engineering incidents
@@ -350,7 +350,7 @@ Consider:
 - What are the constraints?
 
 ## Current Focus
-Designing Newton's storage and runtime architecture.
+Designing Nous's storage and runtime architecture.
 
 ## Relevant Past Decisions
 - Chose Postgres + pgvector over separate ChromaDB for unified storage [success, 0.85] — "Unification reduces operational surface. One backup, one monitor, one connection pool."
@@ -360,7 +360,7 @@ Designing Newton's storage and runtime architecture.
 ## Known Information
 - PostgreSQL supports UNLOGGED tables for cache-like workloads (no WAL overhead)
 - Redis adds a separate service to manage, monitor, and backup
-- Newton's docker-compose currently has 3 services (newton, postgres, dashboard)
+- Nous's docker-compose currently has 3 services (nous, postgres, dashboard)
 - pgvector query performance: 0.37s for hybrid search over 300+ records
 
 ## Procedure: Architecture Decision
@@ -371,7 +371,7 @@ Core patterns:
 - Consider operational cost, not just capability
 
 ## Past Experience
-- Newton storage architecture discussion (2h, with Tim) — chose Postgres + pgvector, rejected multi-service approaches
+- Nous storage architecture discussion (2h, with Tim) — chose Postgres + pgvector, rejected multi-service approaches
 - CE SQLite migration (3h) — abstracting storage layer first made backend swap painless
 
 ## Note

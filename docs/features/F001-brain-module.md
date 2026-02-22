@@ -6,9 +6,9 @@
 
 ## Summary
 
-Newton's Brain is the decision intelligence organ. It handles decision recording, deliberation traces, confidence calibration, guardrails, and decision relationships. Built as a Python module that runs in-process — no MCP, no HTTP, no external service.
+Nous's Brain is the decision intelligence organ. It handles decision recording, deliberation traces, confidence calibration, guardrails, and decision relationships. Built as a Python module that runs in-process — no MCP, no HTTP, no external service.
 
-Embodies the proven principles from Cognition Engines but designed from the ground up for embedded use inside Newton.
+Embodies the proven principles from Cognition Engines but designed from the ground up for embedded use inside Nous.
 
 ## Capabilities
 
@@ -46,7 +46,7 @@ Embodies the proven principles from Cognition Engines but designed from the grou
 ## Interface
 
 ```python
-from newton.brain import Brain
+from nous.brain import Brain
 
 brain = Brain(db_pool)
 
@@ -159,7 +159,7 @@ CREATE TABLE brain.guardrails (
 
 ## What We Take from CE
 
-| CE Feature | Newton Brain | Changes |
+| CE Feature | Nous Brain | Changes |
 |-----------|-------------|---------|
 | Decision recording | ✅ Same principles | UUID keys, embedded API |
 | Deliberation traces | ✅ Same | Simplified tracker (no transport-layer keys) |
@@ -176,20 +176,20 @@ CREATE TABLE brain.guardrails (
 
 **Same ideas, not same code.**
 
-Cognition Engines (CE) is the research prototype that proved decision intelligence works for AI agents. Newton's Brain applies the same principles - decisions, deliberation, calibration, guardrails, bridge definitions, quality scoring - but is a completely independent implementation designed for embedded use.
+Cognition Engines (CE) is the research prototype that proved decision intelligence works for AI agents. Nous's Brain applies the same principles - decisions, deliberation, calibration, guardrails, bridge definitions, quality scoring - but is a completely independent implementation designed for embedded use.
 
-| | Cognition Engines | Newton Brain |
+| | Cognition Engines | Nous Brain |
 |--|---|---|
-| **Role** | Standalone decision intelligence server | Embedded organ inside Newton |
+| **Role** | Standalone decision intelligence server | Embedded organ inside Nous |
 | **Interface** | JSON-RPC, MCP, HTTP | Python function calls |
 | **Storage** | SQLite + ChromaDB | PostgreSQL + pgvector |
 | **Transport** | Network (MCP/HTTP) | In-process (zero overhead) |
 | **Search** | ChromaDB vectors + SQLite FTS | pgvector + tsvector (single query) |
 | **IDs** | String-based | UUIDs |
-| **Audience** | Any AI agent needing decision memory | Newton agents specifically |
+| **Audience** | Any AI agent needing decision memory | Nous agents specifically |
 | **Codebase** | Independent | Independent |
 
-CE continues to exist as a standalone tool. Newton's Brain is purpose-built for embedding. Both evolve independently. The shared asset is the *philosophy*, not the code.
+CE continues to exist as a standalone tool. Nous's Brain is purpose-built for embedding. Both evolve independently. The shared asset is the *philosophy*, not the code.
 
 ---
 

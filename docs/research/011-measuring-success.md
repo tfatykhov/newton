@@ -166,7 +166,7 @@ brier = (1/N) * Σ(confidence - outcome)²
 ```
 Where outcome is 1 (success) or 0 (failure). Perfect calibration = 0.0. Random = 0.25.
 
-Already proven in CE. Newton inherits this directly.
+Already proven in CE. Nous inherits this directly.
 
 **Target:** Brier < 0.05 after 100+ reviewed decisions.
 
@@ -576,7 +576,7 @@ class GrowthReport:
 ### Example Report
 
 ```
-=== Newton Growth Report — Week of Feb 22, 2026 ===
+=== Nous Growth Report — Week of Feb 22, 2026 ===
 
 TASK SUCCESS
   Completed: 47/52 (90%)

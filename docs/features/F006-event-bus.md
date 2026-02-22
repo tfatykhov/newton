@@ -6,7 +6,7 @@
 
 ## Summary
 
-In-process async event bus that connects all Newton systems. Agent actions emit events, handlers react automatically. No cron jobs, no manual triggers. 27 of 29 agent actions are fully automatic.
+In-process async event bus that connects all Nous systems. Agent actions emit events, handlers react automatically. No cron jobs, no manual triggers. 27 of 29 agent actions are fully automatic.
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Agent actions → Event Bus → Handlers → State updates → More events
 ## Interface
 
 ```python
-from newton.events import EventBus, Event
+from nous.events import EventBus, Event
 
 bus = EventBus()
 
@@ -74,7 +74,7 @@ bus.on("episode_completed", my_handler)
 # Emit event (non-blocking, queued)
 await bus.emit(Event(
     type="message_received",
-    agent_id="newton-1",
+    agent_id="nous-1",
     session_id="sess-abc",
     data={"message": "Hello"}
 ))

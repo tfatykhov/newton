@@ -1,23 +1,23 @@
 # Research Note 006: v0.1.0 Features
 
-*What does the first Newton agent actually do?*
+*What does the first Nous agent actually do?*
 
 ## Guiding Principle
 
-Ship the smallest thing that demonstrates Newton is different from a regular agent. Not a demo — a real agent that does real work and gets better at it.
+Ship the smallest thing that demonstrates Nous is different from a regular agent. Not a demo — a real agent that does real work and gets better at it.
 
 ## v0.1.0: "The Thinking Agent"
 
-An agent that can be given a task, works through it using the Newton Loop, and demonstrably improves over repeated interactions.
+An agent that can be given a task, works through it using the Nous Loop, and demonstrably improves over repeated interactions.
 
 ### F001: Agent Runtime (Docker)
 
-**What:** A Docker container that runs a Newton agent with Claude Agent SDK.
+**What:** A Docker container that runs a Nous agent with Claude Agent SDK.
 
 ```bash
 docker run -e ANTHROPIC_API_KEY=sk-... \
-           -e NEWTON_DB_URL=postgresql://... \
-           ghcr.io/tfatykhov/newton:latest
+           -e NOUS_DB_URL=postgresql://... \
+           ghcr.io/tfatykhov/nous:latest
 ```
 
 **Includes:**
@@ -27,11 +27,11 @@ docker run -e ANTHROPIC_API_KEY=sk-... \
 - REST API for sending messages
 - WebSocket for real-time interaction (optional)
 
-**User story:** "I can start a Newton agent with one command and talk to it."
+**User story:** "I can start a Nous agent with one command and talk to it."
 
 ---
 
-### F002: The Newton Loop (Core Agent Cycle)
+### F002: The Nous Loop (Core Agent Cycle)
 
 **What:** Every interaction follows: Sense → Frame → Recall → Deliberate → Act → Monitor → Learn
 
@@ -167,7 +167,7 @@ LEARNABLE:
 - Brier score computed
 - Agent adjusts future confidence based on track record
 
-**Already built in CE.** Newton just needs to ensure every decision flows through calibration.
+**Already built in CE.** Nous just needs to ensure every decision flows through calibration.
 
 **User story:** "The agent's confidence predictions are actually meaningful — when it says 80%, it's right about 80% of the time."
 
@@ -184,7 +184,7 @@ LEARNABLE:
 - Frame usage distribution
 - Growth metrics (mistakes prevented, K-lines created)
 
-**Implementation:** Extend CE dashboard or build Newton-specific UI.
+**Implementation:** Extend CE dashboard or build Nous-specific UI.
 
 **User story:** "I can see my agent getting smarter over time."
 
@@ -203,7 +203,7 @@ LEARNABLE:
 
 ```mermaid
 graph LR
-    F001[F001<br/>Runtime] --> F002[F002<br/>Newton Loop]
+    F001[F001<br/>Runtime] --> F002[F002<br/>Nous Loop]
     F001 --> F005[F005<br/>Memory Store]
     F002 --> F003[F003<br/>Pre-Action]
     F002 --> F004[F004<br/>Frames]
@@ -234,7 +234,7 @@ graph LR
 |----------|---------|--------|-----------|
 | 1 | F001 Runtime | Medium | Foundation — nothing works without this |
 | 2 | F005 Memory Store | Medium | Storage layer for everything else |
-| 3 | F002 Newton Loop | Medium | Core agent cycle with hooks |
+| 3 | F002 Nous Loop | Medium | Core agent cycle with hooks |
 | 4 | F003 Pre-Action | Low | Already exists in CE, just wire MCP |
 | 5 | F004 Basic Frames | Low | Pattern matching, no ML needed |
 | 6 | F006 Basic Censors | Low | Hard-coded set + DB storage |
@@ -252,7 +252,7 @@ Imagine this interaction:
 ```
 User: "Should we use Redis or Postgres for our cache layer?"
 
-Newton's cognitive process:
+Nous's cognitive process:
   [FRAME] → Decision frame selected (detected "should we")
   [RECALL] → No K-lines yet, skipping
   [PRE-ACTION] → Queried CE: found 2 similar past decisions
@@ -263,14 +263,14 @@ Newton's cognitive process:
     for storage unification. Redis worked for pure caching. This decision 
     depends on whether cache needs persistence..."
   
-Newton's response: "Based on my past experience with similar decisions..."
+Nous's response: "Based on my past experience with similar decisions..."
   [Gives reasoned answer with confidence: 0.75]
 
   [SELF-ASSESS] → Recorded assessment, awaiting outcome
   [CALIBRATION] → Logged confidence for future tracking
 ```
 
-**The difference from a normal agent:** Newton didn't just answer — it framed the problem, checked its history, recorded its reasoning, and set up tracking for future learning. If this decision turns out badly, it'll create a censor for next time.
+**The difference from a normal agent:** Nous didn't just answer — it framed the problem, checked its history, recorded its reasoning, and set up tracking for future learning. If this decision turns out badly, it'll create a censor for next time.
 
 ---
 

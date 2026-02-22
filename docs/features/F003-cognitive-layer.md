@@ -1,4 +1,4 @@
-# F003: Cognitive Layer (The Newton Loop)
+# F003: Cognitive Layer (The Nous Loop)
 
 **Status:** Planned
 **Priority:** P0 — The thinking machinery
@@ -6,11 +6,11 @@
 
 ## Summary
 
-The Cognitive Layer is what makes Newton think, not just respond. It orchestrates Brain and Heart through the Newton Loop: Sense → Frame → Recall → Deliberate → Act → Monitor → Learn.
+The Cognitive Layer is what makes Nous think, not just respond. It orchestrates Brain and Heart through the Nous Loop: Sense → Frame → Recall → Deliberate → Act → Monitor → Learn.
 
 Implemented as hooks in the Claude Agent SDK — intercepts that add cognitive structure without replacing the underlying agent behavior.
 
-## The Newton Loop
+## The Nous Loop
 
 ```
 SENSE → FRAME → RECALL → DELIBERATE → ACT → MONITOR → LEARN
@@ -24,9 +24,9 @@ SENSE → FRAME → RECALL → DELIBERATE → ACT → MONITOR → LEARN
 ## Hook Integration
 
 ```python
-from newton.brain import Brain
-from newton.heart import Heart
-from newton.cognitive import CognitiveLayer
+from nous.brain import Brain
+from nous.heart import Heart
+from nous.cognitive import CognitiveLayer
 from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
 brain = Brain(db_pool)

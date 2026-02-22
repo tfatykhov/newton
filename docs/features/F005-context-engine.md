@@ -62,7 +62,7 @@ Triggers for rebuilding context mid-conversation:
 ## Interface
 
 ```python
-from newton.cognitive import ContextEngine
+from nous.cognitive import ContextEngine
 
 ctx = ContextEngine(brain, heart, embedder)
 
@@ -70,7 +70,7 @@ ctx = ContextEngine(brain, heart, embedder)
 context_str = await ctx.build(
     input="Should we use Redis for caching?",
     frame=decision_frame,
-    agent_id="newton-1"
+    agent_id="nous-1"
 )
 
 # Check if refresh needed on follow-up

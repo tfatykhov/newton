@@ -10,7 +10,7 @@
 
 ```mermaid
 graph TB
-    subgraph "Newton (What We Build)"
+    subgraph "Nous (What We Build)"
         CL[Cognitive Layer<br/>Frames, K-Lines, Censors, Growth]
         MCP_CE[MCP: Cognition Engines<br/>Decision Memory]
         MCP_MEM[MCP: Memory Engine<br/>Episodes, Facts, Procedures]
@@ -46,7 +46,7 @@ graph TB
 ### Hooks = Papert's Principle
 The SDK's hook system lets us intercept the agent loop at specific points without modifying it. This is literally Minsky's "detour" pattern:
 
-| Hook Point | Newton Intercept |
+| Hook Point | Nous Intercept |
 |------------|-----------------|
 | Pre-tool-call | Pre-Action Protocol (query decisions, check guardrails) |
 | Post-tool-call | Self-monitoring (B-brain assessment) |
@@ -57,13 +57,13 @@ The SDK's hook system lets us intercept the agent loop at specific points withou
 We don't replace the agent loop — we add cognitive intercepts around it.
 
 ### MCP = Native Integration
-Cognition Engines already has MCP support. The SDK supports in-process MCP servers with zero subprocess overhead. Newton's memory systems plug in directly:
+Cognition Engines already has MCP support. The SDK supports in-process MCP servers with zero subprocess overhead. Nous's memory systems plug in directly:
 
-- `mcp__newton__pre_action` — Think before acting
-- `mcp__newton__recall` — K-line activation
-- `mcp__newton__frame` — Select cognitive frame
-- `mcp__newton__deliberate` — Record reasoning
-- `mcp__newton__monitor` — Self-assessment
+- `mcp__nous__pre_action` — Think before acting
+- `mcp__nous__recall` — K-line activation
+- `mcp__nous__frame` — Select cognitive frame
+- `mcp__nous__deliberate` — Record reasoning
+- `mcp__nous__monitor` — Self-assessment
 
 ### Claude Code's Loop is Battle-Tested
 The same loop powers Claude Code — used by thousands of developers daily. We get:
@@ -85,7 +85,7 @@ The same loop powers Claude Code — used by thousands of developers daily. We g
 - **Ollama** — fully local/private
 - **Any OpenAI-compatible API**
 
-**Key insight:** Newton's cognitive layer doesn't care which LLM runs underneath. K-lines, frames, censors, deliberation — all work at the prompt/tool level, not the model level. The router makes model selection a deployment choice, not an architecture choice.
+**Key insight:** Nous's cognitive layer doesn't care which LLM runs underneath. K-lines, frames, censors, deliberation — all work at the prompt/tool level, not the model level. The router makes model selection a deployment choice, not an architecture choice.
 
 ### Router Options
 
@@ -100,7 +100,7 @@ The same loop powers Claude Code — used by thousands of developers daily. We g
 ### LangGraph / LangChain
 - Heavy abstractions we'd fight against
 - Their "agent loop" is different from what we want
-- Would need to rebuild Newton's loop inside their framework
+- Would need to rebuild Nous's loop inside their framework
 
 ### Google ADK
 - Good A2A support but Google-biased
@@ -119,7 +119,7 @@ The same loop powers Claude Code — used by thousands of developers daily. We g
 
 ## What We Build vs What We Get
 
-| Component | Build (Newton) | Get (SDK) | Get (Router) |
+| Component | Build (Nous) | Get (SDK) | Get (Router) |
 |-----------|---------------|-----------|--------------|
 | Cognitive layer | ✅ | | |
 | Memory engine | ✅ | | |
@@ -143,12 +143,12 @@ The same loop powers Claude Code — used by thousands of developers daily. We g
 | Anthropic deprecates SDK | Cognitive layer is MCP-based, portable to any MCP host |
 | Router adds latency | <10ms overhead per call, negligible vs LLM latency |
 | SDK hooks insufficient | Can fall back to wrapping SDK calls at Python level |
-| Model quality varies | Newton's calibration tracks per-model performance |
+| Model quality varies | Nous's calibration tracks per-model performance |
 
 ## Next Steps
 
 1. Set up basic Claude Agent SDK project with hooks
-2. Implement pre-action hook (simplest Newton intercept)
+2. Implement pre-action hook (simplest Nous intercept)
 3. Connect Cognition Engines via MCP
 4. Test with router to verify model portability
 5. Build K-line activation as second hook

@@ -6,7 +6,7 @@
 
 ## Summary
 
-Five-level measurement framework that tracks whether Newton is actually getting smarter, not just bigger. Fully automated via event bus. Produces weekly growth reports.
+Five-level measurement framework that tracks whether Nous is actually getting smarter, not just bigger. Fully automated via event bus. Produces weekly growth reports.
 
 ## Five Measurement Levels
 
@@ -70,7 +70,7 @@ Five-level measurement framework that tracks whether Newton is actually getting 
 Auto-generated every Sunday. Stored in `system.growth_reports`.
 
 ```
-=== Newton Growth Report — Week of [date] ===
+=== Nous Growth Report — Week of [date] ===
 
 TASK SUCCESS
   Completed: X/Y (Z%)  |  Satisfaction: N  |  Errors: N

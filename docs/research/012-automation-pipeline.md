@@ -4,7 +4,7 @@
 
 ## Core Idea
 
-Newton's measurement and learning systems run on an **event-driven pipeline**. Agent actions emit events. Events trigger handlers. Handlers update metrics, create censors, adjust context. No cron jobs, no manual reviews, no human in the loop (except when asked).
+Nous's measurement and learning systems run on an **event-driven pipeline**. Agent actions emit events. Events trigger handlers. Handlers update metrics, create censors, adjust context. No cron jobs, no manual reviews, no human in the loop (except when asked).
 
 ## Event Architecture
 
@@ -18,7 +18,7 @@ graph LR
     end
 
     subgraph "Event Bus"
-        EB[Newton Event Bus]
+        EB[Nous Event Bus]
     end
 
     subgraph "Handlers"
@@ -574,8 +574,8 @@ class TickEmitter:
 ## Wiring It All Together
 
 ```python
-class Newton:
-    """The complete Newton agent with all automation."""
+class Nous:
+    """The complete Nous agent with all automation."""
     
     async def start(self, config: dict):
         # Core organs

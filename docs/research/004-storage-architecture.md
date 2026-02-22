@@ -13,7 +13,7 @@ Confidence: 0.85. Postgres is battle-tested, cloud-native, and unifies structure
 1. **Single storage abstraction** — All memory types go through one API
 2. **Backend-swappable** — Postgres default, but plug in anything
 3. **Cloud-ready** — Works with managed services (RDS, Neon, Supabase) or local Docker
-4. **Cognition Engines compatible** — CE remains the decision subsystem, Newton wraps it
+4. **Cognition Engines compatible** — CE remains the decision subsystem, Nous wraps it
 
 ## Storage Abstraction
 
@@ -42,7 +42,7 @@ class SearchResult:
     source: str            # Which backend returned this
 
 class MemoryStore(ABC):
-    """Abstract storage backend for Newton's memory."""
+    """Abstract storage backend for Nous's memory."""
     
     @abstractmethod
     async def store(self, record: MemoryRecord) -> str:
@@ -218,7 +218,7 @@ class MemoryStoreFactory:
     
     @classmethod
     def create(cls, config: dict) -> MemoryStore:
-        backend = config.get("NEWTON_STORAGE", "postgres")
+        backend = config.get("NOUS_STORAGE", "postgres")
         store_class = cls._backends.get(backend)
         if not store_class:
             raise ValueError(f"Unknown storage backend: {backend}")
@@ -228,16 +228,16 @@ class MemoryStoreFactory:
 **Environment config:**
 ```bash
 # PostgreSQL (default)
-NEWTON_STORAGE=postgres
-NEWTON_DB_URL=postgresql://newton:secret@postgres:5432/newton
+NOUS_STORAGE=postgres
+NOUS_DB_URL=postgresql://nous:secret@postgres:5432/nous
 
 # SQLite (dev)
-NEWTON_STORAGE=sqlite
-NEWTON_DB_PATH=data/newton.db
+NOUS_STORAGE=sqlite
+NOUS_DB_PATH=data/nous.db
 
 # Qdrant (high-performance)
-NEWTON_STORAGE=qdrant
-NEWTON_QDRANT_URL=http://qdrant:6333
+NOUS_STORAGE=qdrant
+NOUS_QDRANT_URL=http://qdrant:6333
 ```
 
 ## Memory Types
@@ -255,11 +255,11 @@ NEWTON_QDRANT_URL=http://qdrant:6333
 
 ## Cognition Engines Integration
 
-Newton doesn't replace CE — it wraps it:
+Nous doesn't replace CE — it wraps it:
 
 ```mermaid
 graph TB
-    subgraph "Newton Memory Layer"
+    subgraph "Nous Memory Layer"
         MS[MemoryStore<br/>Unified API]
         MS --> PG[(Postgres)]
     end
@@ -270,19 +270,19 @@ graph TB
     end
     
     subgraph "Agent"
-        A[Newton Agent]
+        A[Nous Agent]
         A -->|decisions| CE
         A -->|everything else| MS
     end
 ```
 
-**Option A:** CE keeps its own storage, Newton stores non-decision memories separately. Simple but two systems.
+**Option A:** CE keeps its own storage, Nous stores non-decision memories separately. Simple but two systems.
 
-**Option B:** CE migrates to Newton's MemoryStore as its backend. Unified but requires CE changes.
+**Option B:** CE migrates to Nous's MemoryStore as its backend. Unified but requires CE changes.
 
 **Option C:** Both use same Postgres instance, different schemas. Shared infrastructure, independent logic.
 
-**Recommendation: Option C** — Same database, `ce` schema for decisions, `newton` schema for everything else. One backup, one connection pool, independent evolution.
+**Recommendation: Option C** — Same database, `ce` schema for decisions, `nous` schema for everything else. One backup, one connection pool, independent evolution.
 
 ## Docker Compose
 
@@ -290,11 +290,11 @@ graph TB
 version: "3.8"
 
 services:
-  newton:
+  nous:
     build: .
     environment:
-      - NEWTON_STORAGE=postgres
-      - NEWTON_DB_URL=postgresql://newton:${DB_PASSWORD}@postgres:5432/newton
+      - NOUS_STORAGE=postgres
+      - NOUS_DB_URL=postgresql://nous:${DB_PASSWORD}@postgres:5432/nous
       - CSTP_URL=http://cstp:9991
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
@@ -305,7 +305,7 @@ services:
     image: ghcr.io/tfatykhov/cognition-agent-decisions:latest
     environment:
       - CSTP_STORAGE=postgres
-      - CSTP_DB_URL=postgresql://newton:${DB_PASSWORD}@postgres:5432/newton
+      - CSTP_DB_URL=postgresql://nous:${DB_PASSWORD}@postgres:5432/nous
     depends_on:
       postgres:
         condition: service_healthy
@@ -313,14 +313,14 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: newton
-      POSTGRES_USER: newton
+      POSTGRES_DB: nous
+      POSTGRES_USER: nous
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U newton"]
+      test: ["CMD-SHELL", "pg_isready -U nous"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -338,14 +338,14 @@ volumes:
 
 ## Migration Path
 
-1. **Phase 1:** Newton uses Postgres, CE stays on SQLite → separate stores
+1. **Phase 1:** Nous uses Postgres, CE stays on SQLite → separate stores
 2. **Phase 2:** Add Postgres backend to CE (DecisionStore ABC makes this easy)
 3. **Phase 3:** Both on same Postgres, shared infra, independent schemas
 4. **Phase 4:** Optionally merge into unified MemoryStore
 
 ## Cloud Deployment Options
 
-| Platform | Postgres | Newton Container | Cost |
+| Platform | Postgres | Nous Container | Cost |
 |----------|----------|-----------------|------|
 | Railway | Built-in Postgres | Docker deploy | ~$5-20/mo |
 | Fly.io | Fly Postgres | Fly Machine | ~$5-15/mo |

@@ -1,6 +1,6 @@
 # Research Note 005: The Cognitive Layer
 
-*The part that makes Newton a mind, not a chatbot.*
+*The part that makes Nous a mind, not a chatbot.*
 
 ## What Is the Cognitive Layer?
 
@@ -202,7 +202,7 @@ class KLine:
 
 **What it does:** Mandatory think-before-acting loop. Queries past experience, checks constraints, records intent.
 
-**Why it matters:** This is Newton's consciousness — not deep self-awareness, but surface-level signals that steer behavior. The pre-action trace IS the thinking.
+**Why it matters:** This is Nous's consciousness — not deep self-awareness, but surface-level signals that steer behavior. The pre-action trace IS the thinking.
 
 ### Components
 
@@ -216,7 +216,7 @@ Built on Cognition Engines' existing `pre_action` API:
 5. Return decision_id for tracking
 ```
 
-**Newton enhancement:** Pre-action also triggers:
+**Nous enhancement:** Pre-action also triggers:
 - K-line activation for the decision domain
 - Frame validation (am I in the right frame for this decision?)
 - Censor check (has this type of action been censored?)
@@ -359,7 +359,7 @@ class Assessment:
 
 **What it does:** Makes the agent better over time. Not by accumulating more knowledge — by building better administrative structures.
 
-**Why it matters:** This is what separates Newton from every other agent framework. Others add memory. Newton adds *management of memory.* Others add tools. Newton adds *wisdom about when to use them.*
+**Why it matters:** This is what separates Nous from every other agent framework. Others add memory. Nous adds *management of memory.* Others add tools. Nous adds *wisdom about when to use them.*
 
 ### Growth Mechanisms
 
@@ -451,13 +451,13 @@ class GrowthReport:
 
 ## The Key Insight
 
-Most agent frameworks try to make LLMs smarter by giving them more context. Newton makes agents smarter by giving them better *management of context.*
+Most agent frameworks try to make LLMs smarter by giving them more context. Nous makes agents smarter by giving them better *management of context.*
 
 It's the difference between:
 - **"Here's everything I know"** (RAG, memory retrieval)
-- **"Here's what's relevant right now, here's what to watch out for, here's how confident to be, and here's what NOT to do"** (Newton)
+- **"Here's what's relevant right now, here's what to watch out for, here's how confident to be, and here's what NOT to do"** (Nous)
 
-The LLM is already smart. Newton makes it wise.
+The LLM is already smart. Nous makes it wise.
 
 ---
 

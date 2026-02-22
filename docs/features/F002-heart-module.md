@@ -2,12 +2,12 @@
 
 **Status:** Planned
 **Priority:** P0 — Core organ
-**Origin:** New for Newton, informed by Minsky's memory theory
+**Origin:** New for Nous, informed by Minsky's memory theory
 **Detail:** See [008-database-design](../research/008-database-design.md), [009-context-management](../research/009-context-management.md), [010-summarization-strategy](../research/010-summarization-strategy.md)
 
 ## Summary
 
-Newton's Heart is the memory organ. It manages episodic, semantic, procedural, working, and censor memory. Like the Brain, it's an embedded Python module — direct function calls, shared Postgres, zero overhead.
+Nous's Heart is the memory organ. It manages episodic, semantic, procedural, working, and censor memory. Like the Brain, it's an embedded Python module — direct function calls, shared Postgres, zero overhead.
 
 Key design principles:
 - **Three detail levels** per memory: micro (20 tok), summary (50-100 tok), full (on demand)
@@ -52,13 +52,13 @@ Key design principles:
 ## Interface
 
 ```python
-from newton.heart import Heart
+from nous.heart import Heart
 
 heart = Heart(db_pool)
 
 # --- Episodic ---
 episode = await heart.record_episode(
-    title="Newton architecture discussion with Tim",
+    title="Nous architecture discussion with Tim",
     summary="Decided on Postgres + pgvector, embedded Brain/Heart modules",
     participants=["Tim"],
     decision_ids=["abc123", "def456"],
@@ -70,7 +70,7 @@ await heart.learn(
     "PostgreSQL pgvector uses ivfflat for ANN indexing",
     category="technical",
     subject="pgvector",
-    source="Newton architecture research"
+    source="Nous architecture research"
 )
 
 # Check before storing duplicates
@@ -91,7 +91,7 @@ await heart.store_procedure(
 procedure = await heart.activate_procedure("architecture-decision")
 
 # --- Working Memory ---
-await heart.focus("Evaluating Postgres vs Qdrant for Newton storage")
+await heart.focus("Evaluating Postgres vs Qdrant for Nous storage")
 await heart.load_context(procedure_id=proc.id)
 await heart.load_context(fact_ids=[fact1.id, fact2.id])
 context = await heart.get_working_memory()  # Returns all loaded items
@@ -285,12 +285,12 @@ Brain and Heart are separate modules but deeply connected:
 
 ```python
 # Both share an event bus for coordination
-class NewtonEvents:
+class NousEvents:
     async def emit(self, event: str, data: dict):
         for handler in self.handlers[event]:
             await handler(data)
 
-events = NewtonEvents()
+events = NousEvents()
 brain = Brain(db_pool, events)
 heart = Heart(db_pool, events)
 
