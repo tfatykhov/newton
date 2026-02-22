@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/nous-project-image.png" alt="Nous - Minds from Mindless Stuff" width="800">
+</p>
+
 # Nous
 
 **A cognitive architecture for AI agents, grounded in Minsky's Society of Mind.**
