@@ -172,9 +172,24 @@ CREATE TABLE brain.guardrails (
 | Pre-action protocol | ✅ Evolved | Part of cognitive layer hooks, not MCP tool |
 | MCP interface | ❌ External only | Internal = Python API |
 
-## Relationship to CE
+## Relationship to Cognition Engines
 
-CE is the research prototype that proved these concepts work. Newton Brain is the production implementation designed for embedding. CE continues to exist as a standalone tool for agents that don't use Newton.
+**Same ideas, not same code.**
+
+Cognition Engines (CE) is the research prototype that proved decision intelligence works for AI agents. Newton's Brain applies the same principles - decisions, deliberation, calibration, guardrails, bridge definitions, quality scoring - but is a completely independent implementation designed for embedded use.
+
+| | Cognition Engines | Newton Brain |
+|--|---|---|
+| **Role** | Standalone decision intelligence server | Embedded organ inside Newton |
+| **Interface** | JSON-RPC, MCP, HTTP | Python function calls |
+| **Storage** | SQLite + ChromaDB | PostgreSQL + pgvector |
+| **Transport** | Network (MCP/HTTP) | In-process (zero overhead) |
+| **Search** | ChromaDB vectors + SQLite FTS | pgvector + tsvector (single query) |
+| **IDs** | String-based | UUIDs |
+| **Audience** | Any AI agent needing decision memory | Newton agents specifically |
+| **Codebase** | Independent | Independent |
+
+CE continues to exist as a standalone tool. Newton's Brain is purpose-built for embedding. Both evolve independently. The shared asset is the *philosophy*, not the code.
 
 ---
 

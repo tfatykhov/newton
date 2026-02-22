@@ -223,14 +223,18 @@ Each sub-agent is locked into a single interpretive frame. The main agent synthe
 
 ## Relationship to Cognition Engines
 
-Newton is **not a fork** of Cognition Engines. It's a cognitive architecture that uses Cognition Engines as its memory and decision subsystem.
+Newton applies the same decision intelligence principles proven by [Cognition Engines](https://github.com/tfatykhov/cognition-agent-decisions) — decisions, deliberation traces, calibration, guardrails, bridge definitions — but is a completely independent implementation.
+
+**Same ideas, not same code.**
+
+Cognition Engines is a standalone server for any AI agent that needs decision memory. Newton's Brain module is a purpose-built embedded implementation of those principles, optimized for in-process use with zero network overhead.
 
 ```
-Newton = Cognitive Architecture (Minsky) + Decision Memory (Cognition Engines) + Agent Runtime
+Cognition Engines  →  proved the ideas work (standalone server, MCP/JSON-RPC)
+Newton Brain       →  applies those ideas as an embedded organ (Python library, Postgres)
 ```
 
-Cognition Engines provides the "what happened" and "what should I do" layer.
-Newton provides the "how to think" and "how to grow" layer.
+Both projects evolve independently. The shared asset is the philosophy, not the codebase.
 
 ## Research Questions
 
