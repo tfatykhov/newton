@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS nous_system;
 CREATE OR REPLACE FUNCTION update_timestamp()
 RETURNS trigger AS $$
 BEGIN
-    NEW.updated_at = NOW();
+    NEW.updated_at = clock_timestamp();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
