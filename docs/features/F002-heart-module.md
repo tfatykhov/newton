@@ -3,10 +3,17 @@
 **Status:** Planned
 **Priority:** P0 — Core organ
 **Origin:** New for Newton, informed by Minsky's memory theory
+**Detail:** See [008-database-design](../research/008-database-design.md), [009-context-management](../research/009-context-management.md), [010-summarization-strategy](../research/010-summarization-strategy.md)
 
 ## Summary
 
-Newton's Heart is the memory organ. It manages episodic, semantic, procedural, and working memory. Like the Brain, it's an embedded Python module — direct function calls, shared Postgres, zero overhead.
+Newton's Heart is the memory organ. It manages episodic, semantic, procedural, working, and censor memory. Like the Brain, it's an embedded Python module — direct function calls, shared Postgres, zero overhead.
+
+Key design principles:
+- **Three detail levels** per memory: micro (20 tok), summary (50-100 tok), full (on demand)
+- **Frame-adaptive context budgets**: 3K-12K tokens depending on task complexity
+- **Automatic lifecycle management**: facts confirm/supersede, episodes trim/archive, censors escalate/retire
+- **Event-driven extraction**: episodes auto-produce facts and censor candidates on close
 
 ## Capabilities
 
