@@ -101,11 +101,15 @@ python -m nous.main
 
 ### Environment Variables
 
-All prefixed with `NOUS_`:
+DB connection vars are **unprefixed** (shared with docker-compose). All others use `NOUS_` prefix:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `NOUS_DB_URL` | `postgresql+asyncpg://nous:nous_dev_password@localhost:5432/nous` | Database connection |
+| `DB_HOST` | `localhost` | Database host (shared with docker-compose) |
+| `DB_PORT` | `5432` | Database port (shared with docker-compose) |
+| `DB_USER` | `nous` | Database user (shared with docker-compose) |
+| `DB_PASSWORD` | `nous_dev_password` | Database password (shared with docker-compose) |
+| `DB_NAME` | `nous` | Database name (shared with docker-compose) |
 | `NOUS_DB_POOL_SIZE` | `10` | Connection pool size |
 | `NOUS_AGENT_ID` | `nous-default` | Agent identifier |
 | `NOUS_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
