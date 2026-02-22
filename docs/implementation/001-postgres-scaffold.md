@@ -1,4 +1,4 @@
-# F004-P1: Foundation — Postgres + Project Scaffold
+# 001: Foundation — Postgres + Project Scaffold
 
 **Status:** Ready to Build
 **Priority:** P0 — Everything depends on this
