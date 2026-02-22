@@ -9,7 +9,6 @@ transaction injection (P1-1).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from uuid import UUID
 
@@ -34,6 +33,7 @@ from nous.heart.schemas import (
     OpenThread,
     ProcedureDetail,
     ProcedureInput,
+    ProcedureOutcome,
     ProcedureSummary,
     RecallResult,
     WorkingMemoryItem,
@@ -255,7 +255,7 @@ class Heart:
     async def record_procedure_outcome(
         self,
         procedure_id: UUID,
-        outcome: str,
+        outcome: ProcedureOutcome,
         session: AsyncSession | None = None,
     ) -> ProcedureDetail:
         """Record procedure activation outcome."""
@@ -414,29 +414,39 @@ class Heart:
         search_types = types or ["episode", "fact", "procedure", "censor"]
         fetch_limit = limit * 2  # Fetch more for merging
 
-        # Build search coroutines for parallel execution
-        tasks: dict[str, object] = {}
+        # Execute searches sequentially — AsyncSession is not safe for
+        # concurrent use, so asyncio.gather would risk InvalidRequestError.
+        search_map: dict[str, object] = {}
         if "episode" in search_types:
-            tasks["episode"] = self.episodes.search(query, fetch_limit, session)
+            search_map["episode"] = ("episodes", {"limit": fetch_limit})
         if "fact" in search_types:
-            tasks["fact"] = self.facts.search(
-                query, fetch_limit, session=session
-            )
+            search_map["fact"] = ("facts", {"limit": fetch_limit})
         if "procedure" in search_types:
-            tasks["procedure"] = self.procedures.search(
-                query, fetch_limit, session=session
-            )
+            search_map["procedure"] = ("procedures", {"limit": fetch_limit})
         if "censor" in search_types:
-            # P1-5: Use read-only search, not check
-            tasks["censor"] = self.censors.search(query, fetch_limit, session=session)
+            search_map["censor"] = ("censors", {"limit": fetch_limit})
 
-        if not tasks:
+        if not search_map:
             return []
 
-        # Execute searches in parallel
-        keys = list(tasks.keys())
-        coros = [tasks[k] for k in keys]
-        results_list = await asyncio.gather(*coros, return_exceptions=True)
+        keys: list[str] = []
+        results_list: list[object] = []
+        for memory_type, (_mgr_name, _kw) in search_map.items():
+            try:
+                if memory_type == "episode":
+                    result = await self.episodes.search(query, fetch_limit, session)
+                elif memory_type == "fact":
+                    result = await self.facts.search(query, fetch_limit, session=session)
+                elif memory_type == "procedure":
+                    result = await self.procedures.search(query, fetch_limit, session=session)
+                else:
+                    # P1-5: Use read-only search, not check
+                    result = await self.censors.search(query, fetch_limit, session=session)
+                keys.append(memory_type)
+                results_list.append(result)
+            except Exception as exc:
+                keys.append(memory_type)
+                results_list.append(exc)
 
         # Apply RRF scoring (k=60)
         k = 60

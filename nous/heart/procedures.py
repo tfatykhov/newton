@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.embeddings import EmbeddingProvider
-from nous.heart.schemas import ProcedureDetail, ProcedureInput, ProcedureSummary
+from nous.heart.schemas import ProcedureDetail, ProcedureInput, ProcedureOutcome, ProcedureSummary
 from nous.heart.search import hybrid_search
 from nous.storage.database import Database
 from nous.storage.models import Event, Procedure
@@ -137,8 +137,10 @@ class ProcedureManager:
     # record_outcome()
     # ------------------------------------------------------------------
 
+    _VALID_OUTCOMES: set[str] = {"success", "failure", "neutral"}
+
     async def record_outcome(
-        self, procedure_id: UUID, outcome: str, session: AsyncSession | None = None
+        self, procedure_id: UUID, outcome: ProcedureOutcome, session: AsyncSession | None = None
     ) -> ProcedureDetail:
         """Record procedure activation outcome."""
         if session is None:
@@ -149,8 +151,13 @@ class ProcedureManager:
         return await self._record_outcome(procedure_id, outcome, session)
 
     async def _record_outcome(
-        self, procedure_id: UUID, outcome: str, session: AsyncSession
+        self, procedure_id: UUID, outcome: ProcedureOutcome, session: AsyncSession
     ) -> ProcedureDetail:
+        if outcome not in self._VALID_OUTCOMES:
+            raise ValueError(
+                f"Invalid outcome {outcome!r}; must be one of {sorted(self._VALID_OUTCOMES)}"
+            )
+
         procedure = await self._get_procedure_orm(procedure_id, session)
         if procedure is None:
             raise ValueError(f"Procedure {procedure_id} not found")
