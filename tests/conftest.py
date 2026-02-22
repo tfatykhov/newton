@@ -12,7 +12,6 @@ from nous.config import Settings
 from nous.storage.database import Database
 from nous.storage.models import Guardrail
 
-
 # ---------------------------------------------------------------------------
 # Mock embedding provider (P1-4 fix: PRNG-seeded, L2-normalized vectors)
 # ---------------------------------------------------------------------------
@@ -33,6 +32,18 @@ class MockEmbeddingProvider:
         vec = [rng.gauss(0, 1) for _ in range(1536)]
         norm = sum(x * x for x in vec) ** 0.5
         return [x / norm for x in vec]
+
+    async def embed_near(self, text: str, noise: float = 0.05) -> list[float]:
+        """Generate embedding similar to embed(text) but with controlled noise.
+
+        Produces vectors with cosine similarity ~(1 - noise) to the base embedding.
+        Used for testing near-duplicate detection and similarity thresholds.
+        """
+        base = await self.embed(text)
+        rng = random.Random(f"{text}_near_{noise}")
+        noisy = [v + rng.gauss(0, noise) for v in base]
+        norm = sum(x * x for x in noisy) ** 0.5
+        return [x / norm for x in noisy]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [await self.embed(t) for t in texts]
@@ -98,6 +109,18 @@ async def session(db):
 def mock_embeddings() -> MockEmbeddingProvider:
     """Mock embedding provider for tests needing deterministic vectors."""
     return MockEmbeddingProvider()
+
+
+@pytest_asyncio.fixture
+async def heart(db, mock_embeddings):
+    """Heart instance with mock embeddings for testing."""
+    from nous.config import Settings
+    from nous.heart import Heart
+
+    settings = Settings()
+    h = Heart(db, settings, embedding_provider=mock_embeddings)
+    yield h
+    await h.close()
 
 
 GUARDRAIL_TEST_AGENT = "test-guardrail-agent"

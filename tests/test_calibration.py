@@ -119,15 +119,9 @@ async def test_no_reviewed_decisions(session, engine):
 
 async def test_per_category_breakdown(session, engine):
     """Stats grouped by category."""
-    await _insert_decision(
-        session, confidence=1.0, outcome="success", category="architecture"
-    )
-    await _insert_decision(
-        session, confidence=1.0, outcome="success", category="architecture"
-    )
-    await _insert_decision(
-        session, confidence=0.5, outcome="failure", category="tooling"
-    )
+    await _insert_decision(session, confidence=1.0, outcome="success", category="architecture")
+    await _insert_decision(session, confidence=1.0, outcome="success", category="architecture")
+    await _insert_decision(session, confidence=0.5, outcome="failure", category="tooling")
 
     report = await engine.compute(session, "test-cal-agent")
     assert "architecture" in report.category_stats

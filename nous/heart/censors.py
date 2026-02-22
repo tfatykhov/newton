@@ -1,0 +1,565 @@
+"""Censor management — things NOT to do.
+
+Manages learned constraints with semantic matching, escalation, and
+false positive tracking. All methods follow Brain's session injection
+pattern (P1-1).
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from nous.brain.embeddings import EmbeddingProvider
+from nous.heart.schemas import CensorDetail, CensorInput, CensorMatch
+from nous.storage.database import Database
+from nous.storage.models import Censor, Event
+
+logger = logging.getLogger(__name__)
+
+# Escalation path: warn -> block -> absolute. No downgrade.
+_ESCALATION_ORDER = {"warn": "block", "block": "absolute", "absolute": "absolute"}
+
+
+class CensorManager:
+    """Manages censors — things NOT to do."""
+
+    def __init__(
+        self,
+        db: Database,
+        embeddings: EmbeddingProvider | None,
+        agent_id: str,
+    ) -> None:
+        self.db = db
+        self.embeddings = embeddings
+        self.agent_id = agent_id
+
+    # ------------------------------------------------------------------
+    # Event helper
+    # ------------------------------------------------------------------
+
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
+        """Insert event in same session (P2-1)."""
+        event = Event(
+            agent_id=self.agent_id,
+            event_type=event_type,
+            data=data,
+        )
+        session.add(event)
+
+    # ------------------------------------------------------------------
+    # add()
+    # ------------------------------------------------------------------
+
+    async def add(self, input: CensorInput, session: AsyncSession | None = None) -> CensorDetail:
+        """Create a new censor."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._add(input, session)
+                await session.commit()
+                return result
+        return await self._add(input, session)
+
+    async def _add(self, input: CensorInput, session: AsyncSession) -> CensorDetail:
+        # Generate embedding from trigger_pattern + reason
+        embedding = None
+        if self.embeddings:
+            embed_text = f"{input.trigger_pattern} {input.reason}"
+            try:
+                embedding = await self.embeddings.embed(embed_text)
+            except Exception:
+                logger.warning("Embedding generation failed for censor add")
+
+        censor = Censor(
+            agent_id=self.agent_id,
+            trigger_pattern=input.trigger_pattern,
+            action=input.action,
+            reason=input.reason,
+            domain=input.domain,
+            learned_from_decision=input.learned_from_decision,
+            learned_from_episode=input.learned_from_episode,
+            created_by="manual",
+            embedding=embedding,
+        )
+        session.add(censor)
+        await session.flush()
+
+        await self._emit_event(
+            session,
+            "censor_created",
+            {
+                "censor_id": str(censor.id),
+                "trigger": input.trigger_pattern,
+                "action": input.action,
+            },
+        )
+
+        return self._to_detail(censor)
+
+    # ------------------------------------------------------------------
+    # check() — side-effecting censor evaluation
+    # ------------------------------------------------------------------
+
+    async def check(
+        self,
+        text_input: str,
+        domain: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[CensorMatch]:
+        """Check text against all active censors (with side effects).
+
+        Increments activation_count, updates last_activated, and
+        auto-escalates when threshold is reached.
+        """
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._check(text_input, domain, session)
+                await session.commit()
+                return result
+        return await self._check(text_input, domain, session)
+
+    async def _check(
+        self,
+        text_input: str,
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[CensorMatch]:
+        matches: list[tuple[Censor, float]] = []
+
+        if self.embeddings:
+            # Semantic matching: cosine similarity > 0.7
+            try:
+                embedding = await self.embeddings.embed(text_input)
+                matches = await self._semantic_match(embedding, domain, session)
+            except Exception:
+                logger.warning("Embedding failed for censor check, falling back to ILIKE")
+                matches = await self._keyword_match(text_input, domain, session)
+        else:
+            # P1-3: ILIKE fallback when no embedding provider
+            matches = await self._keyword_match(text_input, domain, session)
+
+        # Apply side effects for each match
+        results: list[CensorMatch] = []
+        now = datetime.now(UTC)
+
+        for censor, _similarity in matches:
+            # Increment activation_count (P2-9: NULL-safe)
+            censor.activation_count = (censor.activation_count or 0) + 1
+            censor.last_activated = now
+
+            # Auto-escalation check
+            threshold = censor.escalation_threshold or 3
+            if censor.activation_count >= threshold and censor.action == "warn":
+                old_action = censor.action
+                censor.action = "block"
+                await self._emit_event(
+                    session,
+                    "censor_escalated",
+                    {
+                        "censor_id": str(censor.id),
+                        "old_action": old_action,
+                        "new_action": "block",
+                    },
+                )
+
+            await self._emit_event(
+                session,
+                "censor_triggered",
+                {
+                    "censor_id": str(censor.id),
+                    "matched_text": text_input[:200],
+                },
+            )
+
+            results.append(
+                CensorMatch(
+                    id=censor.id,
+                    trigger_pattern=censor.trigger_pattern,
+                    action=censor.action,
+                    reason=censor.reason,
+                    domain=censor.domain,
+                )
+            )
+
+        await session.flush()
+        return results
+
+    async def _semantic_match(
+        self,
+        embedding: list[float],
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[tuple[Censor, float]]:
+        """Find censors with cosine similarity > 0.7."""
+        embedding_str = "[" + ",".join(str(float(v)) for v in embedding) + "]"
+
+        domain_clause = ""
+        params: dict = {
+            "embedding": embedding_str,
+            "agent_id": self.agent_id,
+            "threshold": 0.7,
+        }
+        if domain:
+            domain_clause = "AND (domain = :domain OR domain IS NULL)"
+            params["domain"] = domain
+
+        sql = text(f"""
+            SELECT id, 1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM heart.censors
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND embedding IS NOT NULL
+              AND 1 - (embedding <=> CAST(:embedding AS vector)) > :threshold
+              {domain_clause}
+            ORDER BY similarity DESC
+        """)
+
+        result = await session.execute(sql, params)
+        rows = result.all()
+
+        if not rows:
+            return []
+
+        # Fetch ORM objects
+        ids = [row.id for row in rows]
+        similarities = {row.id: float(row.similarity) for row in rows}
+
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
+        censors = {c.id: c for c in censor_result.scalars().all()}
+
+        return [(censors[cid], similarities[cid]) for cid in ids if cid in censors]
+
+    async def _keyword_match(
+        self,
+        text_input: str,
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[tuple[Censor, float]]:
+        """P1-3: ILIKE fallback — case-insensitive containment on trigger_pattern."""
+        domain_clause = ""
+        params: dict = {
+            "text_input": text_input.lower(),
+            "agent_id": self.agent_id,
+        }
+        if domain:
+            domain_clause = "AND (domain = :domain OR domain IS NULL)"
+            params["domain"] = domain
+
+        sql = text(f"""
+            SELECT id
+            FROM heart.censors
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND position(lower(trigger_pattern) in :text_input) > 0
+              {domain_clause}
+        """)
+
+        result = await session.execute(sql, params)
+        rows = result.all()
+
+        if not rows:
+            return []
+
+        ids = [row.id for row in rows]
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
+        censors = censor_result.scalars().all()
+
+        # Keyword matches get a default similarity of 1.0
+        return [(c, 1.0) for c in censors]
+
+    # ------------------------------------------------------------------
+    # search() — read-only (P1-5)
+    # ------------------------------------------------------------------
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+        domain: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[CensorMatch]:
+        """Read-only semantic search over censors (no side effects).
+
+        Unlike check(), this does NOT increment activation_count,
+        does NOT update last_activated, and does NOT auto-escalate.
+        Used by Heart.recall() for safe censor searching.
+        """
+        if session is None:
+            async with self.db.session() as session:
+                return await self._search(query, limit, domain, session)
+        return await self._search(query, limit, domain, session)
+
+    async def _search(
+        self,
+        query: str,
+        limit: int,
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[CensorMatch]:
+        if self.embeddings:
+            try:
+                embedding = await self.embeddings.embed(query)
+            except Exception:
+                logger.warning("Embedding failed for censor search, falling back to ILIKE")
+                return await self._keyword_search(query, limit, domain, session)
+
+            return await self._semantic_search(embedding, limit, domain, session)
+
+        return await self._keyword_search(query, limit, domain, session)
+
+    async def _semantic_search(
+        self,
+        embedding: list[float],
+        limit: int,
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[CensorMatch]:
+        """Read-only semantic search — no counters, no escalation."""
+        embedding_str = "[" + ",".join(str(float(v)) for v in embedding) + "]"
+
+        domain_clause = ""
+        params: dict = {
+            "embedding": embedding_str,
+            "agent_id": self.agent_id,
+            "threshold": 0.7,
+            "limit": limit,
+        }
+        if domain:
+            domain_clause = "AND (domain = :domain OR domain IS NULL)"
+            params["domain"] = domain
+
+        sql = text(f"""
+            SELECT id, 1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM heart.censors
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND embedding IS NOT NULL
+              AND 1 - (embedding <=> CAST(:embedding AS vector)) > :threshold
+              {domain_clause}
+            ORDER BY similarity DESC
+            LIMIT :limit
+        """)
+
+        result = await session.execute(sql, params)
+        rows = result.all()
+
+        if not rows:
+            return []
+
+        ids = [row.id for row in rows]
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
+        censors = {c.id: c for c in censor_result.scalars().all()}
+
+        return [
+            CensorMatch(
+                id=c.id,
+                trigger_pattern=c.trigger_pattern,
+                action=c.action,
+                reason=c.reason,
+                domain=c.domain,
+            )
+            for cid in ids
+            if (c := censors.get(cid)) is not None
+        ]
+
+    async def _keyword_search(
+        self,
+        query: str,
+        limit: int,
+        domain: str | None,
+        session: AsyncSession,
+    ) -> list[CensorMatch]:
+        """Read-only ILIKE keyword search."""
+        domain_clause = ""
+        params: dict = {
+            "query": query.lower(),
+            "agent_id": self.agent_id,
+            "limit": limit,
+        }
+        if domain:
+            domain_clause = "AND (domain = :domain OR domain IS NULL)"
+            params["domain"] = domain
+
+        sql = text(f"""
+            SELECT id
+            FROM heart.censors
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND (
+                  position(lower(trigger_pattern) in :query) > 0
+                  OR position(:query in lower(trigger_pattern)) > 0
+              )
+              {domain_clause}
+            LIMIT :limit
+        """)
+
+        result = await session.execute(sql, params)
+        rows = result.all()
+
+        if not rows:
+            return []
+
+        ids = [row.id for row in rows]
+        censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
+        censors = {c.id: c for c in censor_result.scalars().all()}
+
+        return [
+            CensorMatch(
+                id=c.id,
+                trigger_pattern=c.trigger_pattern,
+                action=c.action,
+                reason=c.reason,
+                domain=c.domain,
+            )
+            for cid in ids
+            if (c := censors.get(cid)) is not None
+        ]
+
+    # ------------------------------------------------------------------
+    # record_false_positive()
+    # ------------------------------------------------------------------
+
+    async def record_false_positive(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
+        """Record a false positive trigger."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._record_false_positive(censor_id, session)
+                await session.commit()
+                return result
+        return await self._record_false_positive(censor_id, session)
+
+    async def _record_false_positive(self, censor_id: UUID, session: AsyncSession) -> CensorDetail:
+        censor = await self._get_censor_orm(censor_id, session)
+        if censor is None:
+            raise ValueError(f"Censor {censor_id} not found")
+
+        # P2-9: NULL-safe counter
+        censor.false_positive_count = (censor.false_positive_count or 0) + 1
+        censor.last_false_positive = datetime.now(UTC)
+
+        # Log warning if more than half are false positives
+        act_count = censor.activation_count or 0
+        if act_count > 0 and censor.false_positive_count > act_count * 0.5:
+            logger.warning(
+                "Censor %s has high false positive rate: %d/%d",
+                censor_id,
+                censor.false_positive_count,
+                act_count,
+            )
+
+        await session.flush()
+        return self._to_detail(censor)
+
+    # ------------------------------------------------------------------
+    # escalate()
+    # ------------------------------------------------------------------
+
+    async def escalate(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
+        """Manually escalate censor severity. warn -> block -> absolute. No downgrade."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._escalate(censor_id, session)
+                await session.commit()
+                return result
+        return await self._escalate(censor_id, session)
+
+    async def _escalate(self, censor_id: UUID, session: AsyncSession) -> CensorDetail:
+        censor = await self._get_censor_orm(censor_id, session)
+        if censor is None:
+            raise ValueError(f"Censor {censor_id} not found")
+
+        old_action = censor.action
+        new_action = _ESCALATION_ORDER.get(old_action, old_action)
+
+        if new_action != old_action:
+            censor.action = new_action
+            await session.flush()
+
+            await self._emit_event(
+                session,
+                "censor_escalated",
+                {
+                    "censor_id": str(censor_id),
+                    "old_action": old_action,
+                    "new_action": new_action,
+                },
+            )
+
+        return self._to_detail(censor)
+
+    # ------------------------------------------------------------------
+    # list_active()
+    # ------------------------------------------------------------------
+
+    async def list_active(self, domain: str | None = None, session: AsyncSession | None = None) -> list[CensorDetail]:
+        """List all active censors, optionally filtered by domain."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._list_active(domain, session)
+        return await self._list_active(domain, session)
+
+    async def _list_active(self, domain: str | None, session: AsyncSession) -> list[CensorDetail]:
+        stmt = (
+            select(Censor).where(Censor.agent_id == self.agent_id).where(Censor.active == True)  # noqa: E712
+        )
+        if domain is not None:
+            stmt = stmt.where((Censor.domain == domain) | (Censor.domain.is_(None)))
+
+        result = await session.execute(stmt)
+        censors = result.scalars().all()
+        return [self._to_detail(c) for c in censors]
+
+    # ------------------------------------------------------------------
+    # deactivate()
+    # ------------------------------------------------------------------
+
+    async def deactivate(self, censor_id: UUID, session: AsyncSession | None = None) -> None:
+        """Deactivate a censor. Set active=false."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._deactivate(censor_id, session)
+                await session.commit()
+                return
+        await self._deactivate(censor_id, session)
+
+    async def _deactivate(self, censor_id: UUID, session: AsyncSession) -> None:
+        censor = await self._get_censor_orm(censor_id, session)
+        if censor is None:
+            raise ValueError(f"Censor {censor_id} not found")
+        censor.active = False
+        await session.flush()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    async def _get_censor_orm(self, censor_id: UUID, session: AsyncSession) -> Censor | None:
+        """Fetch Censor ORM scoped by agent_id."""
+        result = await session.execute(
+            select(Censor).where(Censor.id == censor_id).where(Censor.agent_id == self.agent_id)
+        )
+        return result.scalars().first()
+
+    def _to_detail(self, censor: Censor) -> CensorDetail:
+        """Convert ORM Censor to CensorDetail DTO."""
+        return CensorDetail(
+            id=censor.id,
+            agent_id=censor.agent_id,
+            trigger_pattern=censor.trigger_pattern,
+            action=censor.action,
+            reason=censor.reason,
+            domain=censor.domain,
+            learned_from_decision=censor.learned_from_decision,
+            learned_from_episode=censor.learned_from_episode,
+            created_by=censor.created_by or "manual",
+            activation_count=censor.activation_count or 0,
+            last_activated=censor.last_activated,
+            false_positive_count=censor.false_positive_count or 0,
+            escalation_threshold=censor.escalation_threshold or 3,
+            active=censor.active if censor.active is not None else True,
+            created_at=censor.created_at,
+        )

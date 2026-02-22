@@ -17,12 +17,11 @@ from nous.brain.schemas import (
     DecisionSummary,
     GraphEdgeInfo,
     GuardrailResult,
-    RecordInput,
     ReasonInput,
+    RecordInput,
     ThoughtInfo,
 )
-from nous.config import Settings
-from nous.storage.models import Decision, Event, Guardrail
+from nous.storage.models import Event
 
 # Must match conftest.GUARDRAIL_TEST_AGENT
 GUARDRAIL_TEST_AGENT = "test-guardrail-agent"
@@ -323,9 +322,7 @@ async def test_query_with_filters(brain, session):
     )
 
     # Filter by category
-    results = await brain.query(
-        "decision", category="architecture", session=session
-    )
+    results = await brain.query("decision", category="architecture", session=session)
     assert isinstance(results, list)
     for r in results:
         assert r.category == "architecture"

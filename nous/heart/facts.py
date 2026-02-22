@@ -1,0 +1,554 @@
+"""Fact management — semantic memory (what we know).
+
+Manages facts with provenance, deduplication, superseding, and contradiction.
+All methods follow Brain's session injection pattern (P1-1).
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from uuid import UUID
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from nous.brain.embeddings import EmbeddingProvider
+from nous.heart.schemas import FactDetail, FactInput, FactSummary
+from nous.heart.search import hybrid_search
+from nous.storage.database import Database
+from nous.storage.models import Event, Fact
+
+logger = logging.getLogger(__name__)
+
+
+class FactManager:
+    """Manages semantic memory — what we know."""
+
+    def __init__(
+        self,
+        db: Database,
+        embeddings: EmbeddingProvider | None,
+        agent_id: str,
+    ) -> None:
+        self.db = db
+        self.embeddings = embeddings
+        self.agent_id = agent_id
+
+    # ------------------------------------------------------------------
+    # Event helper
+    # ------------------------------------------------------------------
+
+    async def _emit_event(self, session: AsyncSession, event_type: str, data: dict) -> None:
+        """Insert event in same session (P2-1)."""
+        event = Event(
+            agent_id=self.agent_id,
+            event_type=event_type,
+            data=data,
+        )
+        session.add(event)
+
+    # ------------------------------------------------------------------
+    # learn()
+    # ------------------------------------------------------------------
+
+    async def learn(
+        self,
+        input: FactInput,
+        exclude_ids: list[UUID] | None = None,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Store a new fact with deduplication.
+
+        Args:
+            input: Fact data to store.
+            exclude_ids: Fact IDs to exclude from dedup check (P1-2).
+                Used by supersede/contradict to avoid matching the old fact.
+            session: Optional session for transaction injection.
+        """
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._learn(input, exclude_ids or [], session)
+                await session.commit()
+                return result
+        return await self._learn(input, exclude_ids or [], session)
+
+    async def _learn(
+        self,
+        input: FactInput,
+        exclude_ids: list[UUID],
+        session: AsyncSession,
+    ) -> FactDetail:
+        # Generate embedding
+        embedding = None
+        if self.embeddings:
+            try:
+                embedding = await self.embeddings.embed(input.content)
+            except Exception:
+                logger.warning("Embedding generation failed for fact learn")
+
+        # Near-duplicate detection: cosine similarity > 0.95
+        if embedding is not None:
+            dupe = await self._find_duplicate(embedding, exclude_ids, session)
+            if dupe is not None:
+                # Confirm existing fact instead of creating new
+                return await self._confirm(dupe.id, session)
+
+        fact = Fact(
+            agent_id=self.agent_id,
+            content=input.content,
+            category=input.category,
+            subject=input.subject,
+            confidence=input.confidence,
+            source=input.source,
+            source_episode_id=input.source_episode_id,
+            source_decision_id=input.source_decision_id,
+            contradiction_of=input.contradiction_of,
+            tags=input.tags or None,
+            embedding=embedding,
+        )
+        session.add(fact)
+        await session.flush()
+
+        await self._emit_event(
+            session,
+            "fact_learned",
+            {
+                "fact_id": str(fact.id),
+                "category": input.category,
+                "subject": input.subject,
+            },
+        )
+
+        return self._to_detail(fact)
+
+    async def _find_duplicate(
+        self,
+        embedding: list[float],
+        exclude_ids: list[UUID],
+        session: AsyncSession,
+    ) -> Fact | None:
+        """Find a near-duplicate fact by cosine similarity > 0.95."""
+        embedding_str = "[" + ",".join(str(float(v)) for v in embedding) + "]"
+
+        # Build exclude clause (P1-2)
+        exclude_clause = ""
+        params: dict = {
+            "embedding": embedding_str,
+            "agent_id": self.agent_id,
+            "threshold": 0.95,
+        }
+        if exclude_ids:
+            placeholders = ", ".join(f":excl_{i}" for i in range(len(exclude_ids)))
+            exclude_clause = f"AND id NOT IN ({placeholders})"
+            for i, eid in enumerate(exclude_ids):
+                params[f"excl_{i}"] = eid
+
+        sql = text(f"""
+            SELECT id, 1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM heart.facts
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND embedding IS NOT NULL
+              AND 1 - (embedding <=> CAST(:embedding AS vector)) > :threshold
+              {exclude_clause}
+            ORDER BY embedding <=> CAST(:embedding AS vector)
+            LIMIT 1
+        """)
+
+        result = await session.execute(sql, params)
+        row = result.first()
+        if row is None:
+            return None
+
+        # Fetch the ORM object
+        fact_result = await session.execute(select(Fact).where(Fact.id == row.id))
+        return fact_result.scalars().first()
+
+    # ------------------------------------------------------------------
+    # confirm()
+    # ------------------------------------------------------------------
+
+    async def confirm(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
+        """Confirm a fact is still true."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._confirm(fact_id, session)
+                await session.commit()
+                return result
+        return await self._confirm(fact_id, session)
+
+    async def _confirm(self, fact_id: UUID, session: AsyncSession) -> FactDetail:
+        fact = await self._get_fact_orm(fact_id, session)
+        if fact is None:
+            raise ValueError(f"Fact {fact_id} not found")
+
+        # P2-9: NULL-safe counter increment
+        fact.confirmation_count = (fact.confirmation_count or 0) + 1
+        fact.last_confirmed = datetime.now(UTC)
+        await session.flush()
+
+        await self._emit_event(
+            session,
+            "fact_confirmed",
+            {
+                "fact_id": str(fact_id),
+                "confirmation_count": fact.confirmation_count,
+            },
+        )
+
+        return self._to_detail(fact)
+
+    # ------------------------------------------------------------------
+    # supersede()
+    # ------------------------------------------------------------------
+
+    async def supersede(
+        self,
+        old_fact_id: UUID,
+        new_fact: FactInput,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Replace a fact with a newer version."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._supersede(old_fact_id, new_fact, session)
+                await session.commit()
+                return result
+        return await self._supersede(old_fact_id, new_fact, session)
+
+    async def _supersede(
+        self,
+        old_fact_id: UUID,
+        new_fact: FactInput,
+        session: AsyncSession,
+    ) -> FactDetail:
+        # Verify old fact exists
+        old_fact = await self._get_fact_orm(old_fact_id, session)
+        if old_fact is None:
+            raise ValueError(f"Fact {old_fact_id} not found")
+
+        # P1-2: exclude old fact from dedup check
+        new_detail = await self._learn(new_fact, [old_fact_id], session)
+
+        # Update old fact
+        old_fact.superseded_by = new_detail.id
+        old_fact.active = False
+        await session.flush()
+
+        await self._emit_event(
+            session,
+            "fact_superseded",
+            {
+                "old_fact_id": str(old_fact_id),
+                "new_fact_id": str(new_detail.id),
+            },
+        )
+
+        return new_detail
+
+    # ------------------------------------------------------------------
+    # contradict()
+    # ------------------------------------------------------------------
+
+    async def contradict(
+        self,
+        fact_id: UUID,
+        contradicting_fact: FactInput,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Store a fact that contradicts an existing one."""
+        if session is None:
+            async with self.db.session() as session:
+                result = await self._contradict(fact_id, contradicting_fact, session)
+                await session.commit()
+                return result
+        return await self._contradict(fact_id, contradicting_fact, session)
+
+    async def _contradict(
+        self,
+        fact_id: UUID,
+        contradicting_fact: FactInput,
+        session: AsyncSession,
+    ) -> FactDetail:
+        # Verify target fact exists
+        old_fact = await self._get_fact_orm(fact_id, session)
+        if old_fact is None:
+            raise ValueError(f"Fact {fact_id} not found")
+
+        # P1-2: exclude target from dedup check
+        new_detail = await self._learn(contradicting_fact, [fact_id], session)
+
+        # Set contradiction_of on the new fact
+        new_fact_orm = await self._get_fact_orm(new_detail.id, session)
+        if new_fact_orm is not None:
+            new_fact_orm.contradiction_of = fact_id
+            await session.flush()
+
+        # Reduce confidence of old fact by 0.2 (min 0.0)
+        old_confidence = old_fact.confidence or 1.0
+        old_fact.confidence = max(0.0, old_confidence - 0.2)
+        await session.flush()
+
+        # Re-read new fact to get updated contradiction_of
+        updated = await self._get_fact_orm(new_detail.id, session)
+        return self._to_detail(updated)
+
+    # ------------------------------------------------------------------
+    # get()
+    # ------------------------------------------------------------------
+
+    async def get(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail | None:
+        """Fetch a single fact."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get(fact_id, session)
+        return await self._get(fact_id, session)
+
+    async def _get(self, fact_id: UUID, session: AsyncSession) -> FactDetail | None:
+        fact = await self._get_fact_orm(fact_id, session)
+        if fact is None:
+            return None
+        return self._to_detail(fact)
+
+    # ------------------------------------------------------------------
+    # search()
+    # ------------------------------------------------------------------
+
+    async def search(
+        self,
+        query: str,
+        limit: int = 10,
+        category: str | None = None,
+        active_only: bool = True,
+        session: AsyncSession | None = None,
+    ) -> list[FactSummary]:
+        """Hybrid search over facts."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._search(query, limit, category, active_only, session)
+        return await self._search(query, limit, category, active_only, session)
+
+    async def _search(
+        self,
+        query: str,
+        limit: int,
+        category: str | None,
+        active_only: bool,
+        session: AsyncSession,
+    ) -> list[FactSummary]:
+        # Generate query embedding
+        embedding = None
+        if self.embeddings:
+            try:
+                embedding = await self.embeddings.embed(query)
+            except Exception:
+                logger.warning("Embedding generation failed for fact search")
+
+        extra_where = ""
+        extra_params: dict = {}
+        if category:
+            extra_where += " AND t.category = :category"
+            extra_params["category"] = category
+
+        # Note: hybrid_search always applies active=true filter.
+        # For active_only=False, we need a different approach.
+        if not active_only:
+            # Override the default active filter by using raw search
+            # The hybrid_search helper always filters active=true,
+            # so for inactive facts we do a simpler query.
+            return await self._search_all(query, embedding, limit, category, session)
+
+        results = await hybrid_search(
+            session=session,
+            table="heart.facts",
+            embedding=embedding,
+            query_text=query,
+            agent_id=self.agent_id,
+            extra_where=extra_where,
+            extra_params=extra_params,
+            limit=limit,
+        )
+
+        if not results:
+            return []
+
+        ids = [r[0] for r in results]
+        scores = {r[0]: r[1] for r in results}
+
+        fact_result = await session.execute(select(Fact).where(Fact.id.in_(ids)))
+        facts = {f.id: f for f in fact_result.scalars().all()}
+
+        return [
+            FactSummary(
+                id=f.id,
+                content=f.content,
+                category=f.category,
+                subject=f.subject,
+                confidence=f.confidence or 1.0,
+                active=f.active if f.active is not None else True,
+                score=scores.get(f.id),
+            )
+            for fid in ids
+            if (f := facts.get(fid)) is not None
+        ]
+
+    async def _search_all(
+        self,
+        query: str,
+        embedding: list[float] | None,
+        limit: int,
+        category: str | None,
+        session: AsyncSession,
+    ) -> list[FactSummary]:
+        """Search all facts including inactive (no active filter)."""
+        params: dict = {
+            "agent_id": self.agent_id,
+            "query_text": query,
+            "limit": limit,
+        }
+        filter_extra = ""
+        if category:
+            filter_extra = "AND t.category = :category"
+            params["category"] = category
+
+        if embedding is not None:
+            params["query_embedding"] = "[" + ",".join(str(float(v)) for v in embedding) + "]"
+            sql = text(f"""
+                SELECT t.id,
+                    (COALESCE(1 - (t.embedding <=> CAST(:query_embedding AS vector)), 0) * 0.7
+                     + COALESCE(
+                         ts_rank_cd(t.search_tsv, plainto_tsquery('english', :query_text))
+                         / (1.0 + ts_rank_cd(t.search_tsv, plainto_tsquery('english', :query_text))),
+                       0) * 0.3
+                    ) AS combined_score
+                FROM heart.facts t
+                WHERE t.agent_id = :agent_id {filter_extra}
+                  AND (t.embedding IS NOT NULL OR t.search_tsv @@ plainto_tsquery('english', :query_text))
+                ORDER BY combined_score DESC
+                LIMIT :limit
+            """)
+        else:
+            sql = text(f"""
+                SELECT t.id,
+                    ts_rank_cd(t.search_tsv, plainto_tsquery('english', :query_text))
+                    / (1.0 + ts_rank_cd(t.search_tsv, plainto_tsquery('english', :query_text))) AS score
+                FROM heart.facts t
+                WHERE t.search_tsv @@ plainto_tsquery('english', :query_text)
+                  AND t.agent_id = :agent_id {filter_extra}
+                ORDER BY score DESC
+                LIMIT :limit
+            """)
+
+        result = await session.execute(sql, params)
+        rows = result.all()
+        if not rows:
+            return []
+
+        ids = [row.id for row in rows]
+        scores = {row.id: float(row[1]) for row in rows}
+
+        fact_result = await session.execute(select(Fact).where(Fact.id.in_(ids)))
+        facts = {f.id: f for f in fact_result.scalars().all()}
+
+        return [
+            FactSummary(
+                id=f.id,
+                content=f.content,
+                category=f.category,
+                subject=f.subject,
+                confidence=f.confidence or 1.0,
+                active=f.active if f.active is not None else True,
+                score=scores.get(f.id),
+            )
+            for fid in ids
+            if (f := facts.get(fid)) is not None
+        ]
+
+    # ------------------------------------------------------------------
+    # get_current() — P3-5: recursive CTE
+    # ------------------------------------------------------------------
+
+    async def get_current(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
+        """Follow superseded_by chain to find current version of a fact."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get_current(fact_id, session)
+        return await self._get_current(fact_id, session)
+
+    async def _get_current(self, fact_id: UUID, session: AsyncSession) -> FactDetail:
+        sql = text("""
+            WITH RECURSIVE chain AS (
+                SELECT id, superseded_by, 1 AS depth
+                FROM heart.facts
+                WHERE id = :start_id AND agent_id = :agent_id
+                UNION ALL
+                SELECT f.id, f.superseded_by, c.depth + 1
+                FROM heart.facts f
+                JOIN chain c ON f.id = c.superseded_by
+                WHERE c.depth < 10
+            )
+            SELECT id FROM chain WHERE superseded_by IS NULL
+        """)
+
+        result = await session.execute(sql, {"start_id": fact_id, "agent_id": self.agent_id})
+        row = result.first()
+        if row is None:
+            raise ValueError(f"Fact {fact_id} not found")
+
+        current_fact = await self._get_fact_orm(row.id, session)
+        if current_fact is None:
+            raise ValueError(f"Current fact for {fact_id} not found")
+
+        return self._to_detail(current_fact)
+
+    # ------------------------------------------------------------------
+    # deactivate()
+    # ------------------------------------------------------------------
+
+    async def deactivate(self, fact_id: UUID, session: AsyncSession | None = None) -> None:
+        """Soft-delete a fact."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._deactivate(fact_id, session)
+                await session.commit()
+                return
+        await self._deactivate(fact_id, session)
+
+    async def _deactivate(self, fact_id: UUID, session: AsyncSession) -> None:
+        fact = await self._get_fact_orm(fact_id, session)
+        if fact is None:
+            raise ValueError(f"Fact {fact_id} not found")
+        fact.active = False
+        await session.flush()
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    async def _get_fact_orm(self, fact_id: UUID, session: AsyncSession) -> Fact | None:
+        """Fetch Fact ORM scoped by agent_id."""
+        result = await session.execute(select(Fact).where(Fact.id == fact_id).where(Fact.agent_id == self.agent_id))
+        return result.scalars().first()
+
+    def _to_detail(self, fact: Fact) -> FactDetail:
+        """Convert ORM Fact to FactDetail DTO."""
+        return FactDetail(
+            id=fact.id,
+            agent_id=fact.agent_id,
+            content=fact.content,
+            category=fact.category,
+            subject=fact.subject,
+            confidence=fact.confidence or 1.0,
+            source=fact.source,
+            source_episode_id=fact.source_episode_id,
+            source_decision_id=fact.source_decision_id,
+            learned_at=fact.learned_at,
+            last_confirmed=fact.last_confirmed,
+            confirmation_count=fact.confirmation_count or 0,
+            superseded_by=fact.superseded_by,
+            contradiction_of=fact.contradiction_of,
+            active=fact.active if fact.active is not None else True,
+            tags=fact.tags or [],
+            created_at=fact.created_at,
+        )

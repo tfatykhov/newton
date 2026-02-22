@@ -53,9 +53,7 @@ class Frame(Base):
     __table_args__ = {"schema": "nous_system"}
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    agent_id: Mapped[str | None] = mapped_column(
-        String(100), ForeignKey("nous_system.agents.id")
-    )
+    agent_id: Mapped[str | None] = mapped_column(String(100), ForeignKey("nous_system.agents.id"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     activation_patterns = mapped_column(ARRAY(Text), nullable=True)
@@ -78,9 +76,7 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = {"schema": "nous_system"}
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(100))
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -111,9 +107,7 @@ class Decision(Base):
         {"schema": "brain"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[str | None] = mapped_column(Text)
@@ -131,18 +125,12 @@ class Decision(Base):
     updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
     # Relationships
-    tags: Mapped[list["DecisionTag"]] = relationship(
-        back_populates="decision", cascade="all, delete-orphan"
-    )
-    reasons: Mapped[list["DecisionReason"]] = relationship(
-        back_populates="decision", cascade="all, delete-orphan"
-    )
+    tags: Mapped[list["DecisionTag"]] = relationship(back_populates="decision", cascade="all, delete-orphan")
+    reasons: Mapped[list["DecisionReason"]] = relationship(back_populates="decision", cascade="all, delete-orphan")
     bridge: Mapped["DecisionBridge | None"] = relationship(
         back_populates="decision", cascade="all, delete-orphan", uselist=False
     )
-    thoughts: Mapped[list["Thought"]] = relationship(
-        back_populates="decision", cascade="all, delete-orphan"
-    )
+    thoughts: Mapped[list["Thought"]] = relationship(back_populates="decision", cascade="all, delete-orphan")
 
 
 class DecisionTag(Base):
@@ -164,15 +152,14 @@ class DecisionReason(Base):
     __tablename__ = "decision_reasons"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('analysis', 'pattern', 'empirical', 'authority', 'intuition', 'analogy', 'elimination', 'constraint')",
+            "type IN ('analysis', 'pattern', 'empirical', 'authority',"
+            " 'intuition', 'analogy', 'elimination', 'constraint')",
             name="ck_reasons_type",
         ),
         {"schema": "brain"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     decision_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("brain.decisions.id", ondelete="CASCADE"),
@@ -206,9 +193,7 @@ class Thought(Base):
     __tablename__ = "thoughts"
     __table_args__ = {"schema": "brain"}
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     decision_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("brain.decisions.id", ondelete="CASCADE"),
@@ -233,9 +218,7 @@ class GraphEdge(Base):
         {"schema": "brain"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     source_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("brain.decisions.id", ondelete="CASCADE"),
@@ -263,16 +246,12 @@ class Guardrail(Base):
         {"schema": "brain"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     condition: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    severity: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="warn"
-    )
+    severity: Mapped[str] = mapped_column(String(20), nullable=False, server_default="warn")
     activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
@@ -283,9 +262,7 @@ class CalibrationSnapshot(Base):
     __tablename__ = "calibration_snapshots"
     __table_args__ = {"schema": "brain"}
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     total_decisions: Mapped[int | None] = mapped_column(Integer)
     reviewed_decisions: Mapped[int | None] = mapped_column(Integer)
@@ -313,15 +290,13 @@ class Episode(Base):
         {"schema": "heart"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     title: Mapped[str | None] = mapped_column(String(500))
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     detail: Mapped[str | None] = mapped_column(Text)
-    started_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    ended_at: Mapped[datetime | None] = mapped_column()
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     frame_used: Mapped[str | None] = mapped_column(String(100))
     trigger: Mapped[str | None] = mapped_column(String(100))
@@ -368,30 +343,20 @@ class Fact(Base):
     __tablename__ = "facts"
     __table_args__ = {"schema": "heart"}
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str | None] = mapped_column(String(100))
     subject: Mapped[str | None] = mapped_column(String(500))
     confidence: Mapped[float | None] = mapped_column(Float, server_default="1.0")
     source: Mapped[str | None] = mapped_column(String(500))
-    source_episode_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("heart.episodes.id")
-    )
-    source_decision_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("brain.decisions.id")
-    )
+    source_episode_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.episodes.id"))
+    source_decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("brain.decisions.id"))
     learned_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    last_confirmed: Mapped[datetime | None] = mapped_column()
+    last_confirmed: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    superseded_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("heart.facts.id")
-    )
-    contradiction_of: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("heart.facts.id")
-    )
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.facts.id"))
+    contradiction_of: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.facts.id"))
     embedding = mapped_column(Vector(1536), nullable=True)
     tags = mapped_column(ARRAY(Text), nullable=True)
     # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
@@ -402,21 +367,15 @@ class Fact(Base):
     # Relationships
     source_episode: Mapped["Episode | None"] = relationship(foreign_keys=[source_episode_id])
     source_decision: Mapped["Decision | None"] = relationship(foreign_keys=[source_decision_id])
-    superseding_fact: Mapped["Fact | None"] = relationship(
-        foreign_keys=[superseded_by], remote_side="Fact.id"
-    )
-    contradicting_fact: Mapped["Fact | None"] = relationship(
-        foreign_keys=[contradiction_of], remote_side="Fact.id"
-    )
+    superseding_fact: Mapped["Fact | None"] = relationship(foreign_keys=[superseded_by], remote_side="Fact.id")
+    contradicting_fact: Mapped["Fact | None"] = relationship(foreign_keys=[contradiction_of], remote_side="Fact.id")
 
 
 class Procedure(Base):
     __tablename__ = "procedures"
     __table_args__ = {"schema": "heart"}
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     domain: Mapped[str | None] = mapped_column(String(100))
@@ -430,7 +389,7 @@ class Procedure(Base):
     success_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     failure_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     neutral_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    last_activated: Mapped[datetime | None] = mapped_column()
+    last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     related_procedures = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
     censor_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
     embedding = mapped_column(Vector(1536), nullable=True)
@@ -487,27 +446,21 @@ class Censor(Base):
         {"schema": "heart"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     trigger_pattern: Mapped[str] = mapped_column(Text, nullable=False)
-    action: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default="warn"
-    )
+    action: Mapped[str] = mapped_column(String(20), nullable=False, server_default="warn")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     domain: Mapped[str | None] = mapped_column(String(100))
     learned_from_decision: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("brain.decisions.id")
     )
-    learned_from_episode: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("heart.episodes.id")
-    )
+    learned_from_episode: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.episodes.id"))
     created_by: Mapped[str | None] = mapped_column(String(50), server_default="manual")
     activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    last_activated: Mapped[datetime | None] = mapped_column()
+    last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     false_positive_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    last_false_positive: Mapped[datetime | None] = mapped_column()
+    last_false_positive: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     escalation_threshold: Mapped[int | None] = mapped_column(Integer, server_default="3")
     embedding = mapped_column(Vector(1536), nullable=True)
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
@@ -515,12 +468,8 @@ class Censor(Base):
     updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
     # Relationships
-    source_decision: Mapped["Decision | None"] = relationship(
-        foreign_keys=[learned_from_decision]
-    )
-    source_episode: Mapped["Episode | None"] = relationship(
-        foreign_keys=[learned_from_episode]
-    )
+    source_decision: Mapped["Decision | None"] = relationship(foreign_keys=[learned_from_decision])
+    source_episode: Mapped["Episode | None"] = relationship(foreign_keys=[learned_from_episode])
 
 
 class WorkingMemory(Base):
@@ -530,9 +479,7 @@ class WorkingMemory(Base):
         {"schema": "heart"},
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     session_id: Mapped[str] = mapped_column(String(100), nullable=False)
     current_task: Mapped[str | None] = mapped_column(Text)

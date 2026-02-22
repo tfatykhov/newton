@@ -15,9 +15,7 @@ from nous.storage.models import Decision, DecisionReason
 class CalibrationEngine:
     """Compute calibration metrics from Postgres data."""
 
-    async def compute(
-        self, session: AsyncSession, agent_id: str
-    ) -> CalibrationReport:
+    async def compute(self, session: AsyncSession, agent_id: str) -> CalibrationReport:
         """Compute full calibration report.
 
         Metrics:
@@ -39,8 +37,7 @@ class CalibrationEngine:
         # Directional accuracy: correct if confidence direction matches outcome
         is_correct = case(
             (
-                (Decision.confidence >= 0.5)
-                & (Decision.outcome.in_(["success", "partial"])),
+                (Decision.confidence >= 0.5) & (Decision.outcome.in_(["success", "partial"])),
                 1.0,
             ),
             (
@@ -52,18 +49,14 @@ class CalibrationEngine:
 
         # Base filter: reviewed decisions for this agent
         reviewed_filter = (
-            (Decision.agent_id == agent_id)
-            & (Decision.outcome != "pending")
-            & (Decision.outcome.is_not(None))
+            (Decision.agent_id == agent_id) & (Decision.outcome != "pending") & (Decision.outcome.is_not(None))
         )
 
         # --- Total and reviewed counts ---
         count_result = await session.execute(
             select(
                 func.count().label("total"),
-                func.count()
-                .filter(Decision.outcome != "pending")
-                .label("reviewed"),
+                func.count().filter(Decision.outcome != "pending").label("reviewed"),
             ).where(Decision.agent_id == agent_id)
         )
         counts = count_result.one()
@@ -106,18 +99,14 @@ class CalibrationEngine:
             category_stats[row.category] = {
                 "count": row.count,
                 "accuracy": float(row.accuracy) if row.accuracy is not None else None,
-                "brier_score": (
-                    float(row.brier_score) if row.brier_score is not None else None
-                ),
+                "brier_score": (float(row.brier_score) if row.brier_score is not None else None),
             }
 
         # --- Per-reason-type breakdown ---
         # Use a subquery to deduplicate: one row per (decision, reason_type)
         # so a decision with N reasons of the same type only contributes its
         # Brier error once per type.
-        reason_brier = func.power(
-            Decision.confidence - outcome_binary, 2
-        )
+        reason_brier = func.power(Decision.confidence - outcome_binary, 2)
 
         deduped = (
             select(
@@ -136,35 +125,22 @@ class CalibrationEngine:
                 deduped.c.reason_type,
                 func.count().label("count"),
                 func.avg(deduped.c.brier).label("brier_score"),
-            )
-            .group_by(deduped.c.reason_type)
+            ).group_by(deduped.c.reason_type)
         )
         reason_type_stats = {}
         for row in reason_result:
             reason_type_stats[row.reason_type] = {
                 "count": row.count,
-                "brier_score": (
-                    float(row.brier_score) if row.brier_score is not None else None
-                ),
+                "brier_score": (float(row.brier_score) if row.brier_score is not None else None),
             }
 
         return CalibrationReport(
             total_decisions=total_decisions,
             reviewed_decisions=reviewed_decisions,
-            brier_score=(
-                float(stats.brier_score) if stats.brier_score is not None else None
-            ),
+            brier_score=(float(stats.brier_score) if stats.brier_score is not None else None),
             accuracy=float(stats.accuracy) if stats.accuracy is not None else None,
-            confidence_mean=(
-                float(stats.confidence_mean)
-                if stats.confidence_mean is not None
-                else None
-            ),
-            confidence_stddev=(
-                float(stats.confidence_stddev)
-                if stats.confidence_stddev is not None
-                else None
-            ),
+            confidence_mean=(float(stats.confidence_mean) if stats.confidence_mean is not None else None),
+            confidence_stddev=(float(stats.confidence_stddev) if stats.confidence_stddev is not None else None),
             category_stats=category_stats,
             reason_type_stats=reason_type_stats,
         )

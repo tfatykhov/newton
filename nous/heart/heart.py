@@ -1,0 +1,489 @@
+"""Main Heart class — public API for the memory organ.
+
+Composes all five managers (episodes, facts, procedures, censors,
+working memory) and provides unified recall across memory types.
+
+All methods delegate to managers, passing session through for
+transaction injection (P1-1).
+"""
+
+from __future__ import annotations
+
+import logging
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from nous.brain.embeddings import EmbeddingProvider
+from nous.config import Settings
+from nous.heart.censors import CensorManager
+from nous.heart.episodes import EpisodeManager
+from nous.heart.facts import FactManager
+from nous.heart.procedures import ProcedureManager
+from nous.heart.schemas import (
+    CensorDetail,
+    CensorInput,
+    CensorMatch,
+    EpisodeDetail,
+    EpisodeInput,
+    EpisodeSummary,
+    FactDetail,
+    FactInput,
+    FactSummary,
+    ProcedureDetail,
+    ProcedureInput,
+    ProcedureOutcome,
+    ProcedureSummary,
+    RecallResult,
+    WorkingMemoryItem,
+    WorkingMemoryState,
+)
+from nous.heart.working_memory import WorkingMemoryManager
+from nous.storage.database import Database
+
+logger = logging.getLogger(__name__)
+
+
+class Heart:
+    """Memory organ for Nous agents.
+
+    Composes five manager classes for episodic, semantic, procedural,
+    censor, and working memory. Provides unified recall with
+    reciprocal rank fusion (RRF) for cross-type ranking.
+    """
+
+    def __init__(
+        self,
+        database: Database,
+        settings: Settings,
+        embedding_provider: EmbeddingProvider | None = None,
+        owns_embeddings: bool = True,
+    ) -> None:
+        self.db = database
+        self.settings = settings
+        self.agent_id = settings.agent_id
+        self._embeddings = embedding_provider
+        self._owns_embeddings = owns_embeddings
+
+        # Initialize managers
+        self.episodes = EpisodeManager(database, embedding_provider, settings.agent_id)
+        self.facts = FactManager(database, embedding_provider, settings.agent_id)
+        self.procedures = ProcedureManager(database, embedding_provider, settings.agent_id)
+        self.censors = CensorManager(database, embedding_provider, settings.agent_id)
+        self.working_memory = WorkingMemoryManager(database, settings.agent_id)
+
+    # ------------------------------------------------------------------
+    # Lifecycle (P2-2)
+    # ------------------------------------------------------------------
+
+    async def close(self) -> None:
+        """Close owned resources (embedding provider httpx client).
+
+        Only closes the embedding provider if this Heart instance owns it
+        (owns_embeddings=True). When Brain and Heart share a provider,
+        the caller should set owns_embeddings=False.
+        """
+        if self._owns_embeddings and self._embeddings:
+            await self._embeddings.close()
+
+    async def __aenter__(self) -> Heart:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+    # ==================================================================
+    # Episodes
+    # ==================================================================
+
+    async def start_episode(
+        self,
+        input: EpisodeInput,
+        session: AsyncSession | None = None,
+    ) -> EpisodeDetail:
+        """Start a new episode."""
+        return await self.episodes.start(input, session)
+
+    async def end_episode(
+        self,
+        episode_id: UUID,
+        outcome: str,
+        lessons_learned: list[str] | None = None,
+        surprise_level: float | None = None,
+        session: AsyncSession | None = None,
+    ) -> EpisodeDetail:
+        """Close an episode with outcome and lessons."""
+        return await self.episodes.end(episode_id, outcome, lessons_learned, surprise_level, session)
+
+    async def get_episode(self, episode_id: UUID, session: AsyncSession | None = None) -> EpisodeDetail:
+        """Fetch a single episode. Raises ValueError if not found (P2-7)."""
+        result = await self.episodes.get(episode_id, session)
+        if result is None:
+            raise ValueError(f"Episode {episode_id} not found")
+        return result
+
+    async def list_episodes(
+        self,
+        limit: int = 10,
+        outcome: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[EpisodeSummary]:
+        """List recent episodes."""
+        return await self.episodes.list_recent(limit, outcome, session)
+
+    async def link_decision_to_episode(
+        self,
+        episode_id: UUID,
+        decision_id: UUID,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Link a decision to an episode."""
+        await self.episodes.link_decision(episode_id, decision_id, session)
+
+    async def link_procedure_to_episode(
+        self,
+        episode_id: UUID,
+        procedure_id: UUID,
+        effectiveness: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Link a procedure to an episode."""
+        await self.episodes.link_procedure(episode_id, procedure_id, effectiveness, session)
+
+    async def search_episodes(
+        self,
+        query: str,
+        limit: int = 10,
+        session: AsyncSession | None = None,
+    ) -> list[EpisodeSummary]:
+        """Search episodes."""
+        return await self.episodes.search(query, limit, session)
+
+    # ==================================================================
+    # Facts
+    # ==================================================================
+
+    async def learn(
+        self,
+        input: FactInput,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Store a new fact with deduplication."""
+        return await self.facts.learn(input, session=session)
+
+    async def confirm_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
+        """Confirm a fact is still true."""
+        return await self.facts.confirm(fact_id, session)
+
+    async def supersede_fact(
+        self,
+        old_id: UUID,
+        new_fact: FactInput,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Replace a fact with a newer version."""
+        return await self.facts.supersede(old_id, new_fact, session)
+
+    async def contradict_fact(
+        self,
+        fact_id: UUID,
+        new_fact: FactInput,
+        session: AsyncSession | None = None,
+    ) -> FactDetail:
+        """Store a fact that contradicts an existing one."""
+        return await self.facts.contradict(fact_id, new_fact, session)
+
+    async def get_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
+        """Fetch a single fact. Raises ValueError if not found (P2-7)."""
+        result = await self.facts.get(fact_id, session)
+        if result is None:
+            raise ValueError(f"Fact {fact_id} not found")
+        return result
+
+    async def search_facts(
+        self,
+        query: str,
+        limit: int = 10,
+        category: str | None = None,
+        active_only: bool = True,
+        session: AsyncSession | None = None,
+    ) -> list[FactSummary]:
+        """Hybrid search over facts."""
+        return await self.facts.search(query, limit, category, active_only, session)
+
+    async def get_current_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
+        """Follow superseded_by chain to find current version."""
+        return await self.facts.get_current(fact_id, session)
+
+    async def deactivate_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> None:
+        """Soft-delete a fact."""
+        await self.facts.deactivate(fact_id, session)
+
+    # ==================================================================
+    # Procedures
+    # ==================================================================
+
+    async def store_procedure(self, input: ProcedureInput, session: AsyncSession | None = None) -> ProcedureDetail:
+        """Store a new procedure."""
+        return await self.procedures.store(input, session)
+
+    async def activate_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail:
+        """Mark a procedure as activated."""
+        return await self.procedures.activate(procedure_id, session)
+
+    async def record_procedure_outcome(
+        self,
+        procedure_id: UUID,
+        outcome: ProcedureOutcome,
+        session: AsyncSession | None = None,
+    ) -> ProcedureDetail:
+        """Record procedure activation outcome."""
+        return await self.procedures.record_outcome(procedure_id, outcome, session)
+
+    async def get_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> ProcedureDetail:
+        """Fetch a single procedure. Raises ValueError if not found (P2-7)."""
+        result = await self.procedures.get(procedure_id, session)
+        if result is None:
+            raise ValueError(f"Procedure {procedure_id} not found")
+        return result
+
+    async def search_procedures(
+        self,
+        query: str,
+        limit: int = 10,
+        domain: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[ProcedureSummary]:
+        """Hybrid search over procedures."""
+        return await self.procedures.search(query, limit, domain, session)
+
+    async def retire_procedure(self, procedure_id: UUID, session: AsyncSession | None = None) -> None:
+        """Retire a procedure."""
+        await self.procedures.retire(procedure_id, session)
+
+    # ==================================================================
+    # Censors
+    # ==================================================================
+
+    async def add_censor(self, input: CensorInput, session: AsyncSession | None = None) -> CensorDetail:
+        """Create a new censor."""
+        return await self.censors.add(input, session)
+
+    async def check_censors(
+        self,
+        text: str,
+        domain: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[CensorMatch]:
+        """Check text against active censors (with side effects)."""
+        return await self.censors.check(text, domain, session)
+
+    async def record_false_positive(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
+        """Record a false positive trigger."""
+        return await self.censors.record_false_positive(censor_id, session)
+
+    async def escalate_censor(self, censor_id: UUID, session: AsyncSession | None = None) -> CensorDetail:
+        """Manually escalate censor severity."""
+        return await self.censors.escalate(censor_id, session)
+
+    async def list_censors(
+        self,
+        domain: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[CensorDetail]:
+        """List all active censors."""
+        return await self.censors.list_active(domain, session)
+
+    async def deactivate_censor(self, censor_id: UUID, session: AsyncSession | None = None) -> None:
+        """Deactivate a censor."""
+        await self.censors.deactivate(censor_id, session)
+
+    # ==================================================================
+    # Working Memory
+    # ==================================================================
+
+    async def get_or_create_working_memory(
+        self, session_id: str, session: AsyncSession | None = None
+    ) -> WorkingMemoryState:
+        """Get or create working memory for a session."""
+        return await self.working_memory.get_or_create(session_id, session)
+
+    async def focus(
+        self,
+        session_id: str,
+        task: str,
+        frame: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> WorkingMemoryState:
+        """Set the current task and frame."""
+        return await self.working_memory.focus(session_id, task, frame, session)
+
+    async def load_to_working_memory(
+        self,
+        session_id: str,
+        item: WorkingMemoryItem,
+        session: AsyncSession | None = None,
+    ) -> WorkingMemoryState:
+        """Add an item to working memory."""
+        return await self.working_memory.load_item(session_id, item, session)
+
+    async def evict_from_working_memory(
+        self,
+        session_id: str,
+        ref_id: UUID | None = None,
+        session: AsyncSession | None = None,
+    ) -> WorkingMemoryState:
+        """Evict an item from working memory."""
+        return await self.working_memory.evict(session_id, ref_id, session)
+
+    async def get_working_memory(
+        self, session_id: str, session: AsyncSession | None = None
+    ) -> WorkingMemoryState | None:
+        """Get current working memory state."""
+        return await self.working_memory.get(session_id, session)
+
+    async def clear_working_memory(self, session_id: str, session: AsyncSession | None = None) -> None:
+        """Clear working memory for session."""
+        await self.working_memory.clear(session_id, session)
+
+    # ==================================================================
+    # Unified Recall (P2-3: Reciprocal Rank Fusion)
+    # ==================================================================
+
+    async def recall(
+        self,
+        query: str,
+        limit: int = 10,
+        types: list[str] | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[RecallResult]:
+        """Search across ALL memory types, return ranked results.
+
+        Uses reciprocal rank fusion (RRF) for cross-type ranking:
+        score = 1 / (k + rank) where k=60 (standard constant).
+
+        Parallel sub-searches via asyncio.gather.
+        """
+        if session is None:
+            async with self.db.session() as session:
+                return await self._recall(query, limit, types, session)
+        return await self._recall(query, limit, types, session)
+
+    async def _recall(
+        self,
+        query: str,
+        limit: int,
+        types: list[str] | None,
+        session: AsyncSession,
+    ) -> list[RecallResult]:
+        search_types = types or ["episode", "fact", "procedure", "censor"]
+        fetch_limit = limit * 2  # Fetch more for merging
+
+        # Execute searches sequentially — AsyncSession is not safe for
+        # concurrent use, so asyncio.gather would risk InvalidRequestError.
+        search_map: dict[str, object] = {}
+        if "episode" in search_types:
+            search_map["episode"] = ("episodes", {"limit": fetch_limit})
+        if "fact" in search_types:
+            search_map["fact"] = ("facts", {"limit": fetch_limit})
+        if "procedure" in search_types:
+            search_map["procedure"] = ("procedures", {"limit": fetch_limit})
+        if "censor" in search_types:
+            search_map["censor"] = ("censors", {"limit": fetch_limit})
+
+        if not search_map:
+            return []
+
+        keys: list[str] = []
+        results_list: list[object] = []
+        for memory_type, (_mgr_name, _kw) in search_map.items():
+            try:
+                if memory_type == "episode":
+                    result = await self.episodes.search(query, fetch_limit, session)
+                elif memory_type == "fact":
+                    result = await self.facts.search(query, fetch_limit, session=session)
+                elif memory_type == "procedure":
+                    result = await self.procedures.search(query, fetch_limit, session=session)
+                else:
+                    # P1-5: Use read-only search, not check
+                    result = await self.censors.search(query, fetch_limit, session=session)
+                keys.append(memory_type)
+                results_list.append(result)
+            except Exception as exc:
+                keys.append(memory_type)
+                results_list.append(exc)
+
+        # Apply RRF scoring (k=60)
+        k = 60
+        rrf_items: list[RecallResult] = []
+
+        for memory_type, raw_results in zip(keys, results_list):
+            if isinstance(raw_results, Exception):
+                logger.warning(
+                    "Recall sub-search failed for %s: %s",
+                    memory_type,
+                    raw_results,
+                )
+                continue
+
+            for rank, item in enumerate(raw_results, start=1):
+                rrf_score = 1.0 / (k + rank)
+                recall_result = self._to_recall_result(memory_type, item, rrf_score)
+                if recall_result is not None:
+                    rrf_items.append(recall_result)
+
+        # Sort by RRF score DESC
+        rrf_items.sort(key=lambda r: r.score, reverse=True)
+
+        return rrf_items[:limit]
+
+    def _to_recall_result(self, memory_type: str, item: object, score: float) -> RecallResult | None:
+        """Convert a typed search result to a RecallResult."""
+        if isinstance(item, EpisodeSummary):
+            return RecallResult(
+                type="episode",
+                id=item.id,
+                summary=item.summary,
+                score=score,
+                metadata={
+                    "title": item.title,
+                    "outcome": item.outcome,
+                    "started_at": item.started_at.isoformat() if item.started_at else None,
+                },
+            )
+        elif isinstance(item, FactSummary):
+            return RecallResult(
+                type="fact",
+                id=item.id,
+                summary=item.content,
+                score=score,
+                metadata={
+                    "category": item.category,
+                    "subject": item.subject,
+                    "confidence": item.confidence,
+                },
+            )
+        elif isinstance(item, ProcedureSummary):
+            return RecallResult(
+                type="procedure",
+                id=item.id,
+                summary=item.name,
+                score=score,
+                metadata={
+                    "domain": item.domain,
+                    "effectiveness": item.effectiveness,
+                    "activation_count": item.activation_count,
+                },
+            )
+        elif isinstance(item, CensorMatch):
+            return RecallResult(
+                type="censor",
+                id=item.id,
+                summary=f"{item.trigger_pattern}: {item.reason}",
+                score=score,
+                metadata={
+                    "action": item.action,
+                    "domain": item.domain,
+                },
+            )
+        return None
