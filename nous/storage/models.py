@@ -1,0 +1,543 @@
+"""SQLAlchemy ORM models for all 18 Nous tables across 3 schemas."""
+
+import uuid
+from datetime import datetime
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    """Single declarative base for all schemas."""
+
+    pass
+
+
+# =============================================================================
+# NOUS_SYSTEM SCHEMA (3 tables)
+# =============================================================================
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+    __table_args__ = {"schema": "nous_system"}
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    last_active: Mapped[datetime | None] = mapped_column()
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    frames: Mapped[list["Frame"]] = relationship(back_populates="agent")
+
+
+class Frame(Base):
+    __tablename__ = "frames"
+    __table_args__ = {"schema": "nous_system"}
+
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    agent_id: Mapped[str | None] = mapped_column(
+        String(100), ForeignKey("nous_system.agents.id")
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    activation_patterns = mapped_column(ARRAY(Text), nullable=True)
+    default_category: Mapped[str | None] = mapped_column(String(50))
+    default_stakes: Mapped[str | None] = mapped_column(String(20))
+    questions_to_ask = mapped_column(ARRAY(Text), nullable=True)
+    agencies_to_activate = mapped_column(ARRAY(Text), nullable=True)
+    suppressed_frames = mapped_column(ARRAY(Text), nullable=True)
+    frame_censors = mapped_column(ARRAY(Text), nullable=True)
+    usage_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    last_used: Mapped[datetime | None] = mapped_column()
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    agent: Mapped["Agent | None"] = relationship(back_populates="frames")
+
+
+class Event(Base):
+    __tablename__ = "events"
+    __table_args__ = {"schema": "nous_system"}
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    session_id: Mapped[str | None] = mapped_column(String(100))
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+
+# =============================================================================
+# BRAIN SCHEMA (8 tables)
+# =============================================================================
+
+
+class Decision(Base):
+    __tablename__ = "decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('architecture', 'process', 'tooling', 'security', 'integration')",
+            name="ck_decisions_category",
+        ),
+        CheckConstraint(
+            "stakes IN ('low', 'medium', 'high', 'critical')",
+            name="ck_decisions_stakes",
+        ),
+        CheckConstraint(
+            "outcome IN ('pending', 'success', 'partial', 'failure')",
+            name="ck_decisions_outcome",
+        ),
+        {"schema": "brain"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[str | None] = mapped_column(Text)
+    pattern: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    stakes: Mapped[str] = mapped_column(String(20), nullable=False)
+    quality_score: Mapped[float | None] = mapped_column(Float)
+    outcome: Mapped[str | None] = mapped_column(String(20), server_default="pending")
+    outcome_result: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column()
+    embedding = mapped_column(Vector(1536), nullable=True)
+    # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    tags: Mapped[list["DecisionTag"]] = relationship(
+        back_populates="decision", cascade="all, delete-orphan"
+    )
+    reasons: Mapped[list["DecisionReason"]] = relationship(
+        back_populates="decision", cascade="all, delete-orphan"
+    )
+    bridge: Mapped["DecisionBridge | None"] = relationship(
+        back_populates="decision", cascade="all, delete-orphan", uselist=False
+    )
+    thoughts: Mapped[list["Thought"]] = relationship(
+        back_populates="decision", cascade="all, delete-orphan"
+    )
+
+
+class DecisionTag(Base):
+    __tablename__ = "decision_tags"
+    __table_args__ = {"schema": "brain"}
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tag: Mapped[str] = mapped_column(String(100), primary_key=True)
+
+    # Relationships
+    decision: Mapped["Decision"] = relationship(back_populates="tags")
+
+
+class DecisionReason(Base):
+    __tablename__ = "decision_reasons"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('analysis', 'pattern', 'empirical', 'authority', 'intuition', 'analogy', 'elimination', 'constraint')",
+            name="ck_reasons_type",
+        ),
+        {"schema": "brain"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    decision: Mapped["Decision"] = relationship(back_populates="reasons")
+
+
+class DecisionBridge(Base):
+    __tablename__ = "decision_bridge"
+    __table_args__ = {"schema": "brain"}
+
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    structure: Mapped[str | None] = mapped_column(Text)
+    function: Mapped[str | None] = mapped_column(Text)
+
+    # Relationships
+    decision: Mapped["Decision"] = relationship(back_populates="bridge")
+
+
+class Thought(Base):
+    __tablename__ = "thoughts"
+    __table_args__ = {"schema": "brain"}
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    decision: Mapped["Decision"] = relationship(back_populates="thoughts")
+
+
+class GraphEdge(Base):
+    __tablename__ = "graph_edges"
+    __table_args__ = (
+        UniqueConstraint("source_id", "target_id", "relation", name="uq_edges_src_tgt_rel"),
+        CheckConstraint(
+            "relation IN ('supports', 'contradicts', 'supersedes', 'related_to', 'caused_by')",
+            name="ck_edges_relation",
+        ),
+        {"schema": "brain"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relation: Mapped[str] = mapped_column(String(50), nullable=False)
+    weight: Mapped[float | None] = mapped_column(Float, server_default="1.0")
+    auto_linked: Mapped[bool | None] = mapped_column(Boolean, server_default="false")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+
+class Guardrail(Base):
+    __tablename__ = "guardrails"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "name", name="uq_guardrails_agent_name"),
+        CheckConstraint(
+            "severity IN ('warn', 'block', 'absolute')",
+            name="ck_guardrails_severity",
+        ),
+        {"schema": "brain"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    condition: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="warn"
+    )
+    activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    last_activated: Mapped[datetime | None] = mapped_column()
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+
+class CalibrationSnapshot(Base):
+    __tablename__ = "calibration_snapshots"
+    __table_args__ = {"schema": "brain"}
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    total_decisions: Mapped[int | None] = mapped_column(Integer)
+    reviewed_decisions: Mapped[int | None] = mapped_column(Integer)
+    brier_score: Mapped[float | None] = mapped_column(Float)
+    accuracy: Mapped[float | None] = mapped_column(Float)
+    confidence_mean: Mapped[float | None] = mapped_column(Float)
+    confidence_stddev: Mapped[float | None] = mapped_column(Float)
+    category_stats: Mapped[dict | None] = mapped_column(JSONB)
+    reason_stats: Mapped[dict | None] = mapped_column(JSONB)
+    snapshot_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+
+# =============================================================================
+# HEART SCHEMA (7 tables)
+# =============================================================================
+
+
+class Episode(Base):
+    __tablename__ = "episodes"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('success', 'partial', 'failure', 'ongoing', 'abandoned')",
+            name="ck_episodes_outcome",
+        ),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(500))
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column()
+    duration_seconds: Mapped[int | None] = mapped_column(Integer)
+    frame_used: Mapped[str | None] = mapped_column(String(100))
+    trigger: Mapped[str | None] = mapped_column(String(100))
+    participants = mapped_column(ARRAY(Text), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(50))
+    surprise_level: Mapped[float | None] = mapped_column(Float)
+    lessons_learned = mapped_column(ARRAY(Text), nullable=True)
+    embedding = mapped_column(Vector(1536), nullable=True)
+    tags = mapped_column(ARRAY(Text), nullable=True)
+    # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    episode_decisions: Mapped[list["EpisodeDecision"]] = relationship(
+        back_populates="episode", cascade="all, delete-orphan"
+    )
+    episode_procedures: Mapped[list["EpisodeProcedure"]] = relationship(
+        back_populates="episode", cascade="all, delete-orphan"
+    )
+
+
+class EpisodeDecision(Base):
+    __tablename__ = "episode_decisions"
+    __table_args__ = {"schema": "heart"}
+
+    episode_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("heart.episodes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("brain.decisions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    # Relationships
+    episode: Mapped["Episode"] = relationship(back_populates="episode_decisions")
+    decision: Mapped["Decision"] = relationship()
+
+
+class Fact(Base):
+    __tablename__ = "facts"
+    __table_args__ = {"schema": "heart"}
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100))
+    subject: Mapped[str | None] = mapped_column(String(500))
+    confidence: Mapped[float | None] = mapped_column(Float, server_default="1.0")
+    source: Mapped[str | None] = mapped_column(String(500))
+    source_episode_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("heart.episodes.id")
+    )
+    source_decision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("brain.decisions.id")
+    )
+    learned_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    last_confirmed: Mapped[datetime | None] = mapped_column()
+    confirmation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("heart.facts.id")
+    )
+    contradiction_of: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("heart.facts.id")
+    )
+    embedding = mapped_column(Vector(1536), nullable=True)
+    tags = mapped_column(ARRAY(Text), nullable=True)
+    # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    source_episode: Mapped["Episode | None"] = relationship(foreign_keys=[source_episode_id])
+    source_decision: Mapped["Decision | None"] = relationship(foreign_keys=[source_decision_id])
+    superseding_fact: Mapped["Fact | None"] = relationship(
+        foreign_keys=[superseded_by], remote_side="Fact.id"
+    )
+    contradicting_fact: Mapped["Fact | None"] = relationship(
+        foreign_keys=[contradiction_of], remote_side="Fact.id"
+    )
+
+
+class Procedure(Base):
+    __tablename__ = "procedures"
+    __table_args__ = {"schema": "heart"}
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    domain: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(Text)
+    goals = mapped_column(ARRAY(Text), nullable=True)
+    core_patterns = mapped_column(ARRAY(Text), nullable=True)
+    core_tools = mapped_column(ARRAY(Text), nullable=True)
+    core_concepts = mapped_column(ARRAY(Text), nullable=True)
+    implementation_notes = mapped_column(ARRAY(Text), nullable=True)
+    activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    success_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    failure_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    neutral_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    last_activated: Mapped[datetime | None] = mapped_column()
+    related_procedures = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    censor_ids = mapped_column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    embedding = mapped_column(Vector(1536), nullable=True)
+    tags = mapped_column(ARRAY(Text), nullable=True)
+    # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    episode_procedures: Mapped[list["EpisodeProcedure"]] = relationship(
+        back_populates="procedure", cascade="all, delete-orphan"
+    )
+
+
+class EpisodeProcedure(Base):
+    __tablename__ = "episode_procedures"
+    __table_args__ = (
+        CheckConstraint(
+            "effectiveness IN ('helped', 'neutral', 'hindered')",
+            name="ck_ep_proc_effectiveness",
+        ),
+        {"schema": "heart"},
+    )
+
+    episode_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("heart.episodes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    procedure_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("heart.procedures.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    effectiveness: Mapped[str | None] = mapped_column(String(20))
+
+    # Relationships
+    episode: Mapped["Episode"] = relationship(back_populates="episode_procedures")
+    procedure: Mapped["Procedure"] = relationship(back_populates="episode_procedures")
+
+
+class Censor(Base):
+    __tablename__ = "censors"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('warn', 'block', 'absolute')",
+            name="ck_censors_action",
+        ),
+        CheckConstraint(
+            "created_by IN ('manual', 'auto_failure', 'auto_escalation')",
+            name="ck_censors_created_by",
+        ),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    trigger_pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="warn"
+    )
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str | None] = mapped_column(String(100))
+    learned_from_decision: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("brain.decisions.id")
+    )
+    learned_from_episode: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("heart.episodes.id")
+    )
+    created_by: Mapped[str | None] = mapped_column(String(50), server_default="manual")
+    activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    last_activated: Mapped[datetime | None] = mapped_column()
+    false_positive_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
+    last_false_positive: Mapped[datetime | None] = mapped_column()
+    escalation_threshold: Mapped[int | None] = mapped_column(Integer, server_default="3")
+    embedding = mapped_column(Vector(1536), nullable=True)
+    active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+    # Relationships
+    source_decision: Mapped["Decision | None"] = relationship(
+        foreign_keys=[learned_from_decision]
+    )
+    source_episode: Mapped["Episode | None"] = relationship(
+        foreign_keys=[learned_from_episode]
+    )
+
+
+class WorkingMemory(Base):
+    __tablename__ = "working_memory"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "session_id", name="uq_wm_agent_session"),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    current_task: Mapped[str | None] = mapped_column(Text)
+    current_frame: Mapped[str | None] = mapped_column(String(100))
+    items: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
+    open_threads: Mapped[dict | None] = mapped_column(JSONB, server_default="[]")
+    max_items: Mapped[int | None] = mapped_column(Integer, server_default="20")
+    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
