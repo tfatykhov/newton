@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     log_level: str = "info"
 
+    # Brain settings
+    openai_api_key: str = Field("", validation_alias="OPENAI_API_KEY")
+    auto_link_threshold: float = 0.85
+    auto_link_max: int = 3
+    quality_block_threshold: float = 0.5
+
     @property
     def db_url(self) -> str:
         return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
