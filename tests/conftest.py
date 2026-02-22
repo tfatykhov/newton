@@ -1,5 +1,8 @@
 """Test fixtures using real Postgres via docker-compose."""
 
+import hashlib
+import random
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import event
@@ -7,6 +10,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.config import Settings
 from nous.storage.database import Database
+from nous.storage.models import Guardrail
+
+
+# ---------------------------------------------------------------------------
+# Mock embedding provider (P1-4 fix: PRNG-seeded, L2-normalized vectors)
+# ---------------------------------------------------------------------------
+
+
+class MockEmbeddingProvider:
+    """Returns deterministic, L2-normalized embeddings seeded from text hash.
+
+    Uses PRNG seeded from SHA-256 hash of the input text to produce
+    genuinely different 1536-dim vectors for different inputs. Unlike
+    the naive hash-cycling approach, cosine similarity between unrelated
+    texts is near zero while identical texts produce identical vectors.
+    """
+
+    async def embed(self, text: str) -> list[float]:
+        h = hashlib.sha256(text.encode()).hexdigest()
+        rng = random.Random(h)
+        vec = [rng.gauss(0, 1) for _ in range(1536)]
+        norm = sum(x * x for x in vec) ** 0.5
+        return [x / norm for x in vec]
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [await self.embed(t) for t in texts]
+
+    async def close(self) -> None:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Database fixtures
+# ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -17,6 +54,12 @@ async def db():
     await database.connect()
     yield database
     await database.disconnect()
+
+
+@pytest.fixture(scope="session")
+def settings() -> Settings:
+    """Session-scoped settings instance."""
+    return Settings()
 
 
 @pytest_asyncio.fixture
@@ -44,3 +87,60 @@ async def session(db):
         # Roll back the outer transaction — undoes everything
         await session.close()
         await trans.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Brain fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mock_embeddings() -> MockEmbeddingProvider:
+    """Mock embedding provider for tests needing deterministic vectors."""
+    return MockEmbeddingProvider()
+
+
+GUARDRAIL_TEST_AGENT = "test-guardrail-agent"
+
+
+@pytest_asyncio.fixture
+async def seed_guardrails(session):
+    """Insert the 4 default guardrails into the test session (P1-5 fix).
+
+    Uses a test-specific agent_id to avoid unique constraint collisions
+    with seed.sql data that is already loaded in the real database.
+    """
+    guardrails = [
+        Guardrail(
+            agent_id=GUARDRAIL_TEST_AGENT,
+            name="no-high-stakes-low-confidence",
+            description="Block high-stakes decisions with low confidence",
+            condition={"stakes": "high", "confidence_lt": 0.5},
+            severity="block",
+        ),
+        Guardrail(
+            agent_id=GUARDRAIL_TEST_AGENT,
+            name="no-critical-without-review",
+            description="Block critical-stakes without explicit review",
+            condition={"stakes": "critical"},
+            severity="block",
+        ),
+        Guardrail(
+            agent_id=GUARDRAIL_TEST_AGENT,
+            name="require-reasons",
+            description="Block decisions without at least one reason",
+            condition={"reason_count_lt": 1},
+            severity="block",
+        ),
+        Guardrail(
+            agent_id=GUARDRAIL_TEST_AGENT,
+            name="low-quality-recording",
+            description="Block low-quality decisions (missing tags/pattern)",
+            condition={"quality_lt": 0.5},
+            severity="block",
+        ),
+    ]
+    for g in guardrails:
+        session.add(g)
+    await session.flush()
+    return guardrails

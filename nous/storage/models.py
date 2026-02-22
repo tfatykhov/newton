@@ -7,6 +7,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -123,7 +124,7 @@ class Decision(Base):
     quality_score: Mapped[float | None] = mapped_column(Float)
     outcome: Mapped[str | None] = mapped_column(String(20), server_default="pending")
     outcome_result: Mapped[str | None] = mapped_column(Text)
-    reviewed_at: Mapped[datetime | None] = mapped_column()
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     embedding = mapped_column(Vector(1536), nullable=True)
     # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
@@ -273,7 +274,7 @@ class Guardrail(Base):
         String(20), nullable=False, server_default="warn"
     )
     activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    last_activated: Mapped[datetime | None] = mapped_column()
+    last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
