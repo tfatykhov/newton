@@ -23,8 +23,8 @@ These decisions resolve ambiguities and contradictions found across the spec and
 | D8 | **Use generated `tsvector` columns for FTS** (not expression indexes) | Expression-based GIN indexes require repeating the exact expression in every query. Generated columns (`GENERATED ALWAYS AS ... STORED`) are cleaner for ORM and avoid duplication. | arch |
 | D9 | **Build ORM models for ALL 18 tables** | Mechanical work but ensures schema-ORM alignment upfront. Cheaper than retrofitting later. Models for unused tables serve as documentation. | forge-lead (overriding devil's cut recommendation) |
 | D10 | **Cut `migrations.py`** from deliverables | Undefined in spec, no acceptance criteria. Schema verification is in `Database.connect()`. Real migrations use Alembic (future). | arch + devil |
-| D11 | **Table count is 18, not 17** | brain=8, heart=7, system=3. Research doc 008 summary miscounts brain as 7. | arch + db |
-| D12 | **`system` schema is safe** — not a reserved name in PostgreSQL | Reserved schemas are `pg_catalog` and `information_schema` only. No conflicts with pgvector, pg_trgm, SQLAlchemy, or standard tooling. | db (resolved devil's concern) |
+| D11 | **Table count is 18, not 17** | brain=8, heart=7, nous_system=3. Research doc 008 summary miscounts brain as 7. | arch + db |
+| D12 | **Rename `system` schema to `nous_system`** | `SYSTEM` is non-reserved in PG (works unquoted) but causes practical friction — ORMs, GUI tools (pgAdmin, DBeaver), Alembic, and raw SQL may require quoting or misinterpret it. Rename cost is zero now (no code exists), but high later (every FK, model, test, query). `nous_system` is clear and project-scoped. | user review (overriding db's "safe" assessment) |
 | D13 | **`db` fixture should be session-scoped** | Creating a new engine + pool per test is slow. Session-scoped `db` with function-scoped `session` gives isolation without overhead. | arch |
 | D14 | **Add composite index `decisions(agent_id, created_at DESC)`** | Most common query: "my recent decisions". Separate indexes on each column won't combine efficiently. | db |
 | D15 | **Add missing index on `frames(agent_id)`** | PG does not auto-create FK indexes. Queries filtering frames by agent will seq scan without this. | db |
@@ -113,9 +113,9 @@ volumes:
 
 **Structure** (in order):
 1. Extensions (`vector`, `pg_trgm`)
-2. Schemas (`brain`, `heart`, `system`)
+2. Schemas (`brain`, `heart`, `nous_system`)
 3. Trigger function `update_timestamp()` (D6)
-4. `system` tables: agents, frames, events
+4. `nous_system` tables: agents, frames, events
 5. `brain` tables: decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots
 6. `heart` tables: episodes, episode_decisions, facts, procedures, episode_procedures, censors, working_memory
 7. All indexes (after tables)
@@ -155,7 +155,7 @@ volumes:
 
    -- Apply to every table with updated_at:
    -- brain.decisions, heart.facts, heart.procedures, heart.censors,
-   -- heart.working_memory, system.agents
+   -- heart.working_memory, nous_system.agents
    CREATE TRIGGER set_updated_at BEFORE UPDATE ON brain.decisions
        FOR EACH ROW EXECUTE FUNCTION update_timestamp();
    ```
@@ -196,7 +196,7 @@ volumes:
 6. **Additional indexes** (D14, D15):
    ```sql
    CREATE INDEX idx_decisions_agent_created ON brain.decisions(agent_id, created_at DESC);
-   CREATE INDEX idx_frames_agent ON system.frames(agent_id);
+   CREATE INDEX idx_frames_agent ON nous_system.frames(agent_id);
    ```
 
 7. **DO NOT include**: `search_hybrid()` function (D4).
@@ -305,11 +305,11 @@ class Database:
             result = await conn.execute(
                 text(
                     "SELECT schema_name FROM information_schema.schemata "
-                    "WHERE schema_name IN ('brain', 'heart', 'system')"
+                    "WHERE schema_name IN ('brain', 'heart', 'nous_system')"
                 )
             )
             schemas = {row[0] for row in result}
-            expected = {"brain", "heart", "system"}
+            expected = {"brain", "heart", "nous_system"}
             if schemas != expected:
                 missing = expected - schemas
                 raise RuntimeError(f"Missing database schemas: {missing}")
@@ -361,11 +361,11 @@ class Base(DeclarativeBase):
     pass
 
 
-# --- system schema ---
+# --- nous_system schema ---
 
 class Agent(Base):
     __tablename__ = "agents"
-    __table_args__ = {"schema": "system"}
+    __table_args__ = {"schema": "nous_system"}
 
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -430,7 +430,7 @@ class EpisodeDecision(Base):
 - `Vector(1536)` column NOT wrapped in `Mapped[]` (pgvector quirk)
 - Generated `tsvector` columns are NOT mapped — they're read-only DB-side
 - Composite PKs use `primary_key=True` on multiple columns
-- `agent_id` columns are plain VARCHAR, NOT FK to system.agents (intentional — allows records before agent registration, avoids circular schema deps)
+- `agent_id` columns are plain VARCHAR, NOT FK to nous_system.agents (intentional — allows records before agent registration, avoids circular schema deps)
 
 ### `tests/conftest.py`
 
@@ -492,7 +492,7 @@ async def session(db):
 
 Tests to implement:
 1. `test_connection` — can connect to Postgres
-2. `test_schemas_exist` — brain, heart, system schemas present
+2. `test_schemas_exist` — brain, heart, nous_system schemas present
 3. `test_extensions` — vector and pg_trgm extensions installed
 4. `test_all_tables_exist` — all 18 tables exist with correct schemas
 5. `test_seed_agent` — default agent exists with correct config
