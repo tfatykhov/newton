@@ -73,6 +73,10 @@ class CognitiveLayer:
         # asyncio.Lock per session can come later.
         self._active_episodes: dict[str, str] = {}  # session_id -> episode_id
 
+    async def list_frames(self, agent_id: str, session: AsyncSession | None = None) -> list:
+        """Public delegation to FrameEngine.list_frames()."""
+        return await self._frames.list_frames(agent_id, session=session)
+
     async def pre_turn(
         self,
         agent_id: str,
