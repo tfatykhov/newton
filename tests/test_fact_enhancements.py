@@ -10,12 +10,12 @@ Tests:
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.heart.facts import FactManager
 from nous.heart.schemas import FactInput
-from nous.storage.models import Event, Fact
+from nous.storage.models import Event
 
 
 @pytest_asyncio.fixture
@@ -110,9 +110,7 @@ async def test_domain_threshold_event_emitted(fact_manager: FactManager, db_sess
         )
 
     # Check for threshold event
-    result = await db_session.execute(
-        select(Event).where(Event.event_type == "fact_threshold_exceeded")
-    )
+    result = await db_session.execute(select(Event).where(Event.event_type == "fact_threshold_exceeded"))
     events = result.scalars().all()
     threshold_events = [e for e in events if e.data.get("category") == "test-domain"]
     assert len(threshold_events) >= 1
@@ -136,9 +134,7 @@ async def test_domain_threshold_no_spam(fact_manager: FactManager, db_session: A
             session=db_session,
         )
 
-    result = await db_session.execute(
-        select(Event).where(Event.event_type == "fact_threshold_exceeded")
-    )
+    result = await db_session.execute(select(Event).where(Event.event_type == "fact_threshold_exceeded"))
     events = [e for e in result.scalars().all() if e.data.get("category") == "spam-test"]
 
     # Should emit at excess=1 (count=3) only, not at excess=2,3,4
@@ -175,9 +171,7 @@ async def test_domain_threshold_no_event_without_category(fact_manager: FactMana
         session=db_session,
     )
 
-    result = await db_session.execute(
-        select(Event).where(Event.event_type == "fact_threshold_exceeded")
-    )
+    result = await db_session.execute(select(Event).where(Event.event_type == "fact_threshold_exceeded"))
     events = result.scalars().all()
     assert len(events) == 0
 
@@ -194,9 +188,7 @@ async def test_skip_contradictions_flag(fact_manager: FactManager, db_session: A
             session=db_session,
         )
 
-    result = await db_session.execute(
-        select(Event).where(Event.event_type == "fact_threshold_exceeded")
-    )
+    result = await db_session.execute(select(Event).where(Event.event_type == "fact_threshold_exceeded"))
     events = [e for e in result.scalars().all() if e.data.get("category") == "bulk"]
     assert len(events) == 0
 

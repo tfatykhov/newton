@@ -140,14 +140,14 @@ class FactManager:
             # Contradiction detection: similarity 0.85-0.95 with different content
             if embedding is not None:
                 safe_excludes = list(exclude_ids) + [fact.id]
-                contradiction = await self._find_contradiction(
-                    embedding, fact.content, safe_excludes, session
-                )
+                contradiction = await self._find_contradiction(embedding, fact.content, safe_excludes, session)
                 if contradiction is not None:
                     detail.contradiction_warning = contradiction
                     logger.info(
                         "Contradiction detected for fact %s: similar to %s (%.2f)",
-                        fact.id, contradiction.existing_fact_id, contradiction.similarity,
+                        fact.id,
+                        contradiction.existing_fact_id,
+                        contradiction.similarity,
                     )
 
             # Domain compaction check: emit event if too many facts in same category
