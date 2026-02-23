@@ -114,12 +114,36 @@ async def test_domain_threshold_event_emitted(fact_manager: FactManager, db_sess
         select(Event).where(Event.event_type == "fact_threshold_exceeded")
     )
     events = result.scalars().all()
-    assert len(events) >= 1
+    threshold_events = [e for e in events if e.data.get("category") == "test-domain"]
+    assert len(threshold_events) >= 1
 
-    event_data = events[-1].data
+    event_data = threshold_events[-1].data
     assert event_data["category"] == "test-domain"
     assert event_data["count"] > 3
     assert event_data["threshold"] == 3
+
+
+@pytest.mark.asyncio
+async def test_domain_threshold_no_spam(fact_manager: FactManager, db_session: AsyncSession):
+    """Event should NOT fire on every learn() after threshold — only at intervals."""
+    fact_manager.DOMAIN_COMPACTION_THRESHOLD = 2
+    fact_manager.DOMAIN_COMPACTION_INTERVAL = 5
+
+    # Store 6 facts (threshold=2, so excess goes 1,2,3,4)
+    for i in range(6):
+        await fact_manager.learn(
+            FactInput(content=f"Spam test fact {i} unique content here {i}", category="spam-test"),
+            session=db_session,
+        )
+
+    result = await db_session.execute(
+        select(Event).where(Event.event_type == "fact_threshold_exceeded")
+    )
+    events = [e for e in result.scalars().all() if e.data.get("category") == "spam-test"]
+
+    # Should emit at excess=1 (count=3) only, not at excess=2,3,4
+    # Next would be at excess=5 (count=7) which we don't reach
+    assert len(events) == 1
 
 
 @pytest.mark.asyncio
@@ -155,6 +179,25 @@ async def test_domain_threshold_no_event_without_category(fact_manager: FactMana
         select(Event).where(Event.event_type == "fact_threshold_exceeded")
     )
     events = result.scalars().all()
+    assert len(events) == 0
+
+
+@pytest.mark.asyncio
+async def test_skip_contradictions_flag(fact_manager: FactManager, db_session: AsyncSession):
+    """check_contradictions=False skips both contradiction check and threshold check."""
+    fact_manager.DOMAIN_COMPACTION_THRESHOLD = 1  # Would normally trigger
+
+    for i in range(3):
+        await fact_manager.learn(
+            FactInput(content=f"Bulk import fact {i} with unique text {i}", category="bulk"),
+            check_contradictions=False,
+            session=db_session,
+        )
+
+    result = await db_session.execute(
+        select(Event).where(Event.event_type == "fact_threshold_exceeded")
+    )
+    events = [e for e in result.scalars().all() if e.data.get("category") == "bulk"]
     assert len(events) == 0
 
 
