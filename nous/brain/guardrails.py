@@ -8,8 +8,8 @@ Supports both native CEL expressions and legacy JSONB conditions (auto-converted
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
-import signal
 from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
@@ -27,8 +27,11 @@ logger = logging.getLogger(__name__)
 # Shared CEL environment — thread-safe, reusable
 _CEL_ENV = celpy.Environment()
 
+# Thread pool for CEL evaluation with timeout protection
+_EVAL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+
 # CEL evaluation timeout (seconds)
-CEL_TIMEOUT_SEC = 0.1
+_EVAL_TIMEOUT_SECONDS = 0.1
 
 
 def _to_cel_value(value: Any) -> Any:
@@ -138,49 +141,31 @@ class GuardrailEngine:
         except Exception as e:
             return False, str(e)
 
-    def _evaluate(self, expression: str, activation: dict, severity: str, fail_mode: str = "closed") -> bool:
+    def _evaluate(self, expression: str, activation: dict, severity: str = "block") -> bool:
         """Evaluate a CEL expression with timeout and fail-closed for block severity.
 
         Args:
             expression: CEL expression string
             activation: CEL activation context (decision map)
             severity: Guardrail severity (block, warn, absolute)
-            fail_mode: "closed" (treat error as trigger) or "open" (treat error as no-match)
 
         Returns:
             True if condition matches (guardrail triggers), False otherwise
         """
-
-        def timeout_handler(signum, frame):
-            raise TimeoutError("CEL evaluation timeout")
-
-        # Determine fail behavior: block/absolute severity should fail closed, warn can fail open
-        should_fail_closed = severity in ("block", "absolute") or fail_mode == "closed"
-
-        # Set up timeout (Unix only - signal.SIGALRM)
-        try:
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(1)  # signal.alarm only accepts int seconds
-        except (AttributeError, ValueError):
-            # Windows or other platforms without signal.SIGALRM
-            # Fall through without timeout protection
-            pass
+        # Determine fail behavior: block/absolute severity should fail closed
+        should_fail_closed = severity in ("block", "absolute")
 
         try:
             program = self._compile_program(expression)
-            result = program.evaluate(activation)
+            future = _EVAL_EXECUTOR.submit(program.evaluate, activation)
+            result = future.result(timeout=_EVAL_TIMEOUT_SECONDS)
             return bool(result)
-        except TimeoutError:
-            logger.error("CEL evaluation timeout for: %s (severity=%s)", expression, severity)
+        except concurrent.futures.TimeoutError:
+            logger.error("CEL evaluation timed out: %s (severity=%s)", expression, severity)
             return should_fail_closed  # Fail closed on timeout for block severity
         except Exception:
-            logger.error("CEL evaluation failed for: %s (severity=%s)", expression, severity, exc_info=True)
+            logger.error("CEL evaluation failed: %s (severity=%s)", expression, severity, exc_info=True)
             return should_fail_closed  # Fail closed on error for block severity
-        finally:
-            try:
-                signal.alarm(0)  # Cancel alarm
-            except (AttributeError, ValueError):
-                pass
 
     async def check(
         self,

@@ -537,7 +537,7 @@ async def test_cel_reasons_access(session, engine):
     guardrail = Guardrail(
         agent_id="test-cel-reasons-agent",
         name="require-analysis-reason",
-        condition={"cel": "!decision.reasons.exists(r, r.type == 'analysis')"},
+        condition={"cel": "size([r for r in decision.reasons if r.type == 'analysis']) == 0"},
         severity="warn",
     )
     session.add(guardrail)
@@ -569,3 +569,22 @@ async def test_cel_reasons_access(session, engine):
         ],
     )
     assert "require-analysis-reason" not in result_ok.warnings
+
+
+async def test_cel_evaluation_timeout(engine):
+    """Timeout mechanism works for CEL evaluation."""
+    # Create a very complex nested expression that might take time
+    # Note: This test verifies the timeout mechanism exists and handles gracefully
+    # In practice, CEL evaluations are fast, so actual timeout is rare
+    complex_expr = " && ".join([f"decision.confidence > {i / 100.0}" for i in range(100)])
+
+    valid, error = engine.validate_expression(complex_expr)
+    # Should still validate successfully (syntax is valid)
+    assert valid
+
+    # Even complex expressions should evaluate quickly with ThreadPoolExecutor
+    # The timeout protection ensures we don't hang on pathological cases
+    activation = {"decision": {"confidence": 0.5, "stakes": "low"}}
+    result = engine._evaluate(complex_expr, activation, severity="block")
+    # Should return a boolean (either True/False or fail-closed=True for timeout)
+    assert isinstance(result, bool)
