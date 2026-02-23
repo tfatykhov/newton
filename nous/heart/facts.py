@@ -68,6 +68,8 @@ class FactManager:
         exclude_ids: list[UUID] | None = None,
         check_contradictions: bool = True,
         session: AsyncSession | None = None,
+        encoded_frame: str | None = None,
+        encoded_censors: list[str] | None = None,
     ) -> FactDetail:
         """Store a new fact with deduplication.
 
@@ -78,13 +80,29 @@ class FactManager:
             check_contradictions: Whether to check for contradictions and
                 domain thresholds. Set False for bulk imports. Default True.
             session: Optional session for transaction injection.
+            encoded_frame: Frame active when this fact was learned (003.2).
+            encoded_censors: Censors active when this fact was learned (003.2).
         """
         if session is None:
             async with self.db.session() as session:
-                result = await self._learn(input, list(exclude_ids or []), check_contradictions, session)
+                result = await self._learn(
+                    input,
+                    list(exclude_ids or []),
+                    check_contradictions,
+                    session,
+                    encoded_frame=encoded_frame,
+                    encoded_censors=encoded_censors,
+                )
                 await session.commit()
                 return result
-        return await self._learn(input, list(exclude_ids or []), check_contradictions, session)
+        return await self._learn(
+            input,
+            list(exclude_ids or []),
+            check_contradictions,
+            session,
+            encoded_frame=encoded_frame,
+            encoded_censors=encoded_censors,
+        )
 
     async def _learn(
         self,
@@ -92,6 +110,9 @@ class FactManager:
         exclude_ids: list[UUID],
         check_contradictions: bool,
         session: AsyncSession,
+        *,
+        encoded_frame: str | None = None,
+        encoded_censors: list[str] | None = None,
     ) -> FactDetail:
         # Generate embedding
         embedding = None
@@ -120,6 +141,8 @@ class FactManager:
             contradiction_of=input.contradiction_of,
             tags=input.tags or None,
             embedding=embedding,
+            encoded_frame=encoded_frame,
+            encoded_censors=encoded_censors,
         )
         session.add(fact)
         await session.flush()
