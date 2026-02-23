@@ -121,7 +121,7 @@ def create_app(
                         "brier_score": calibration.brier_score,
                         "accuracy": calibration.accuracy,
                         "total_decisions": calibration.total_decisions,
-                        "reviewed_count": calibration.reviewed_count,
+                        "reviewed_decisions": calibration.reviewed_decisions,
                     },
                     "memory": {
                         "active_conversations": len(runner._conversations),

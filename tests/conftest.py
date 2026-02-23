@@ -5,7 +5,6 @@ import random
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.config import Settings
@@ -75,27 +74,15 @@ def settings() -> Settings:
 
 @pytest_asyncio.fixture
 async def session(db):
-    """Function-scoped session with SAVEPOINT isolation.
+    """Function-scoped session with transaction rollback isolation.
 
-    Tests can call session.commit() freely — everything is rolled back
-    after each test via the outer transaction.
+    Tests can use the session freely — the entire transaction is rolled
+    back after each test via the outer connection transaction.
     """
     async with db.engine.connect() as conn:
         trans = await conn.begin()
         session = AsyncSession(bind=conn, expire_on_commit=False)
-
-        # Start a SAVEPOINT
-        nested = await conn.begin_nested()
-
-        @event.listens_for(session.sync_session, "after_transaction_end")
-        def restart_savepoint(sess, transaction):
-            nonlocal nested
-            if transaction.nested and not transaction._parent.nested:
-                nested = conn.sync_connection.begin_nested()
-
         yield session
-
-        # Roll back the outer transaction — undoes everything
         await session.close()
         await trans.rollback()
 

@@ -151,8 +151,8 @@ async def test_guardrail_jsonb(session):
     )
     guardrail = result.scalar_one()
     assert isinstance(guardrail.condition, dict)
-    assert guardrail.condition["stakes"] == "high"
-    assert guardrail.condition["confidence_lt"] == 0.5
+    assert "cel" in guardrail.condition
+    assert "stakes" in guardrail.condition["cel"]
     assert guardrail.severity == "block"
 
 

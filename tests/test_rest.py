@@ -1,6 +1,6 @@
 """Integration tests for REST API endpoints.
 
-Uses Starlette TestClient (httpx-based, no server needed) for HTTP testing.
+Uses httpx AsyncClient with ASGITransport for async HTTP testing.
 MockAgentRunner for /chat endpoints.
 Real Postgres (existing conftest.py fixtures) for DB-backed endpoints.
 """
@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
-from starlette.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from nous.brain.brain import Brain
 from nous.brain.schemas import ReasonInput, RecordInput
@@ -28,6 +28,7 @@ class MockAgentRunner:
     def __init__(self) -> None:
         self.run_turn_calls: list[tuple] = []
         self.end_conversation_calls: list[tuple] = []
+        self._conversations: dict = {}
         self.preset_response = "This is a test response from Nous."
         self.preset_context = TurnContext(
             system_prompt="You are Nous.",
@@ -88,10 +89,11 @@ def app(mock_runner, brain, heart, cognitive, db, settings):
     return create_app(mock_runner, brain, heart, cognitive, db, settings)
 
 
-@pytest.fixture
-def client(app):
-    """Synchronous Starlette TestClient."""
-    return TestClient(app)
+@pytest_asyncio.fixture
+async def client(app):
+    """Async HTTP client using httpx ASGITransport."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +160,9 @@ async def _seed_censor(heart, session):
 # ---------------------------------------------------------------------------
 
 
-def test_chat_basic(client, mock_runner):
+async def test_chat_basic(client, mock_runner):
     """POST /chat -> 200, response has message + session_id + frame."""
-    resp = client.post("/chat", json={"message": "Hello Nous!"})
+    resp = await client.post("/chat", json={"message": "Hello Nous!"})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -171,10 +173,10 @@ def test_chat_basic(client, mock_runner):
     assert len(mock_runner.run_turn_calls) == 1
 
 
-def test_chat_with_session(client, mock_runner):
+async def test_chat_with_session(client, mock_runner):
     """POST /chat with session_id -> same session reused."""
     session_id = f"test-session-{uuid.uuid4().hex[:8]}"
-    resp = client.post("/chat", json={"message": "Hello!", "session_id": session_id})
+    resp = await client.post("/chat", json={"message": "Hello!", "session_id": session_id})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -182,10 +184,10 @@ def test_chat_with_session(client, mock_runner):
     assert mock_runner.run_turn_calls[0][0] == session_id
 
 
-def test_end_chat(client, mock_runner):
+async def test_end_chat(client, mock_runner):
     """DELETE /chat/{session_id} -> 200."""
     session_id = f"test-session-{uuid.uuid4().hex[:8]}"
-    resp = client.delete(f"/chat/{session_id}")
+    resp = await client.delete(f"/chat/{session_id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -199,9 +201,9 @@ def test_end_chat(client, mock_runner):
 # ---------------------------------------------------------------------------
 
 
-def test_status(client, settings):
+async def test_status(client, settings):
     """GET /status -> agent info + calibration + memory counts."""
-    resp = client.get("/status")
+    resp = await client.get("/status")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -220,7 +222,7 @@ async def test_list_decisions(client, brain, session):
     await _seed_decision(brain, session)
     await session.commit()
 
-    resp = client.get("/decisions")
+    resp = await client.get("/decisions")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -231,22 +233,33 @@ async def test_list_decisions(client, brain, session):
         assert isinstance(data["total"], int)
 
 
-async def test_get_decision(client, brain, session):
+async def test_get_decision(client, brain):
     """GET /decisions/{id} -> detail."""
-    detail = await _seed_decision(brain, session)
-    await session.commit()
+    # Seed without test session so data commits to DB and is visible
+    # to the endpoint's own session (different connection).
+    detail = await brain.record(
+        RecordInput(
+            description="Test decision for REST get",
+            confidence=0.85,
+            category="architecture",
+            stakes="medium",
+            context="Testing REST get endpoint",
+            reasons=[ReasonInput(type="analysis", text="Test reason")],
+            tags=["test", "rest-get"],
+        ),
+    )
 
-    resp = client.get(f"/decisions/{detail.id}")
+    resp = await client.get(f"/decisions/{detail.id}")
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["description"] == "Test decision for REST API"
+    assert data["description"] == "Test decision for REST get"
 
 
-def test_get_decision_not_found(client):
+async def test_get_decision_not_found(client):
     """GET /decisions/{bad_id} -> 404."""
     fake_id = str(uuid.uuid4())
-    resp = client.get(f"/decisions/{fake_id}")
+    resp = await client.get(f"/decisions/{fake_id}")
 
     assert resp.status_code == 404
 
@@ -261,7 +274,7 @@ async def test_list_episodes(client, heart, session):
     await _seed_episode(heart, session)
     await session.commit()
 
-    resp = client.get("/episodes")
+    resp = await client.get("/episodes")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -279,7 +292,7 @@ async def test_search_facts(client, heart, session):
     await _seed_fact(heart, session)
     await session.commit()
 
-    resp = client.get("/facts", params={"q": "test fact REST"})
+    resp = await client.get("/facts", params={"q": "test fact REST"})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -287,9 +300,9 @@ async def test_search_facts(client, heart, session):
     assert isinstance(data["facts"], list)
 
 
-def test_search_facts_no_query(client):
+async def test_search_facts_no_query(client):
     """GET /facts -> 400 (missing q param)."""
-    resp = client.get("/facts")
+    resp = await client.get("/facts")
 
     assert resp.status_code == 400
 
@@ -304,7 +317,7 @@ async def test_list_censors(client, heart, session):
     await _seed_censor(heart, session)
     await session.commit()
 
-    resp = client.get("/censors")
+    resp = await client.get("/censors")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -317,9 +330,9 @@ async def test_list_censors(client, heart, session):
 # ---------------------------------------------------------------------------
 
 
-def test_list_frames(client):
+async def test_list_frames(client):
     """GET /frames -> frame list (6 default frames from seed.sql)."""
-    resp = client.get("/frames")
+    resp = await client.get("/frames")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -332,9 +345,9 @@ def test_list_frames(client):
 # ---------------------------------------------------------------------------
 
 
-def test_calibration(client):
+async def test_calibration(client):
     """GET /calibration -> report."""
-    resp = client.get("/calibration")
+    resp = await client.get("/calibration")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -347,16 +360,16 @@ def test_calibration(client):
 # ---------------------------------------------------------------------------
 
 
-def test_health(client):
+async def test_health(client):
     """GET /health -> healthy."""
-    resp = client.get("/health")
+    resp = await client.get("/health")
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "healthy"
 
 
-def test_health_db_down(mock_runner, brain, heart, cognitive, settings):
+async def test_health_db_down(mock_runner, brain, heart, cognitive, settings):
     """GET /health with broken DB -> unhealthy."""
     from unittest.mock import AsyncMock, MagicMock
 
@@ -373,9 +386,8 @@ def test_health_db_down(mock_runner, brain, heart, cognitive, settings):
     mock_db.session.return_value = mock_session_cm
 
     app = create_app(mock_runner, brain, heart, cognitive, mock_db, settings)
-    client = TestClient(app, raise_server_exceptions=False)
-
-    resp = client.get("/health")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/health")
 
     # Should return unhealthy (either 200 with unhealthy status or 503)
     data = resp.json()

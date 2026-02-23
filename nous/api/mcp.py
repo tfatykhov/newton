@@ -7,7 +7,7 @@ Exposes 5 tools:
   nous_teach   - Add a fact or procedure to Nous's memory
   nous_decide  - Ask Nous to make a decision (forces decision frame)
 
-Uses mcp library's Server + Streamable HTTP transport,
+Uses mcp library's Server + StreamableHTTPServerTransport,
 mounted at /mcp on the same Starlette app.
 """
 
@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from typing import Any
 
+import anyio
 from mcp.server import Server
-from mcp.server.streamable_http import StreamableHTTPSessionManager
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.types import TextContent, Tool
 
 from nous.api.runner import AgentRunner
@@ -30,15 +32,78 @@ from nous.heart.schemas import FactInput, ProcedureInput
 logger = logging.getLogger(__name__)
 
 
+class MCPTransportManager:
+    """Manages MCP Server + StreamableHTTPServerTransport lifecycle.
+
+    Provides an ASGI-compatible handle_request method and a close()
+    method for shutdown.  On the first request the transport is created
+    and server.run() is launched in a background task.
+    """
+
+    def __init__(self, server: Server) -> None:
+        self.server = server
+        self._transport: StreamableHTTPServerTransport | None = None
+        self._task_group: anyio.abc.TaskGroup | None = None
+        self._started = False
+
+    async def _ensure_started(self) -> None:
+        """Lazily start transport + server on first request."""
+        if self._started:
+            return
+
+        session_id = uuid.uuid4().hex
+        self._transport = StreamableHTTPServerTransport(
+            mcp_session_id=session_id,
+            is_json_response_enabled=True,
+        )
+        self._task_group = anyio.create_task_group()
+        await self._task_group.__aenter__()
+
+        async def _run_server(
+            transport: StreamableHTTPServerTransport,
+            server: Server,
+        ) -> None:
+            async with transport.connect() as (read_stream, write_stream):
+                init_options = server.create_initialization_options()
+                await server.run(
+                    read_stream,
+                    write_stream,
+                    init_options,
+                    stateless=True,
+                )
+
+        self._task_group.start_soon(_run_server, self._transport, self.server)
+        self._started = True
+
+    async def handle_request(self, scope: Any, receive: Any, send: Any) -> None:
+        """ASGI entry point — delegates to transport."""
+        await self._ensure_started()
+        assert self._transport is not None
+        await self._transport.handle_request(scope, receive, send)
+
+    async def close(self) -> None:
+        """Shutdown transport and cancel server task."""
+        if self._transport is not None:
+            self._transport.terminate()
+        if self._task_group is not None:
+            self._task_group.cancel_scope.cancel()
+            try:
+                await self._task_group.__aexit__(None, None, None)
+            except Exception:
+                logger.debug("MCP task group cleanup exception (expected)")
+        self._started = False
+
+
 def create_mcp_server(
     runner: AgentRunner,
     brain: Brain,
     heart: Heart,
     settings: Settings,
-) -> StreamableHTTPSessionManager:
+) -> MCPTransportManager:
     """Create MCP server with Nous tools.
 
-    Returns StreamableHTTPSessionManager to be mounted on Starlette.
+    Returns MCPTransportManager to be mounted on Starlette.
+    The manager exposes handle_request() for ASGI and close() for shutdown.
     """
     server = Server("nous")
 
@@ -283,6 +348,4 @@ def create_mcp_server(
         }
         return [TextContent(type="text", text=json.dumps(result, default=str))]
 
-    # Create session manager
-    session_manager = StreamableHTTPSessionManager(server)
-    return session_manager
+    return MCPTransportManager(server)

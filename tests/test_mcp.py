@@ -73,40 +73,30 @@ async def mcp_tools(mock_runner, brain, heart, settings):
     """
     from nous.api.mcp import create_mcp_server
 
-    session_manager = create_mcp_server(mock_runner, brain, heart, settings)
+    manager = create_mcp_server(mock_runner, brain, heart, settings)
 
-    # Try to find the Server object and its registered call_tool handler.
-    # MCP library structure may vary by version, so we try several access paths.
-    server = getattr(session_manager, "_server", None) or getattr(session_manager, "server", None)
+    from mcp.types import CallToolRequest, CallToolRequestParams
+
+    # MCPTransportManager exposes .server directly
+    server = manager.server
 
     call_tool_handler = None
 
     if server:
-        # Strategy 1: mcp SDK stores handlers in request_handlers dict
+        # mcp 1.26.0: request_handlers is keyed by request class, not string
         handlers = getattr(server, "request_handlers", {})
-        call_tool_handler = handlers.get("tools/call")
-
-        # Strategy 2: some versions use _call_tool_handler directly
-        if call_tool_handler is None:
-            call_tool_handler = getattr(server, "_call_tool_handler", None)
+        call_tool_handler = handlers.get(CallToolRequest)
 
     async def call_tool(name: str, arguments: dict):
         """Invoke a registered MCP tool by name."""
         if call_tool_handler is not None:
-            try:
-                from mcp.types import CallToolRequest, CallToolRequestParams
+            request = CallToolRequest(
+                method="tools/call",
+                params=CallToolRequestParams(name=name, arguments=arguments),
+            )
+            result = await call_tool_handler(request)
+            return result
 
-                request = CallToolRequest(
-                    method="tools/call",
-                    params=CallToolRequestParams(name=name, arguments=arguments),
-                )
-                result = await call_tool_handler(request)
-                return result
-            except (ImportError, TypeError):
-                pass
-
-        # Strategy 3: If we can't extract the handler, test via ASGI
-        # by making a real HTTP request through the session manager
         pytest.skip("Could not extract MCP call_tool handler — MCP library version incompatible")
 
     yield call_tool

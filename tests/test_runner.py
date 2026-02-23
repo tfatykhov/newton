@@ -99,7 +99,7 @@ def mock_cognitive():
 def mock_settings():
     """Settings with a fake API key for testing."""
     return Settings(
-        anthropic_api_key="test-key-123",
+        ANTHROPIC_API_KEY="test-key-123",
         agent_id="test-agent",
         model="claude-sonnet-4-5-20250514",
         max_tokens=1024,
