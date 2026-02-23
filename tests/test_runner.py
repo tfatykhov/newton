@@ -234,10 +234,10 @@ async def test_run_turn_with_tool_calls(mock_cognitive, mock_settings):
     heart = MockHeart()
     r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
 
-    # Mock _call_sdk to return tool results
+    # Mock _call_sdk to return tool results with captured result/error
     tool_results = [
-        ToolResult(tool_name="record_decision", arguments={"description": "test"}),
-        ToolResult(tool_name="learn_fact", arguments={"content": "a fact"}),
+        ToolResult(tool_name="record_decision", arguments={"description": "test"}, result="Decision recorded successfully.\nID: abc123"),
+        ToolResult(tool_name="learn_fact", arguments={"content": "a fact"}, result="Fact learned successfully.\nID: def456"),
     ]
     r._call_sdk = AsyncMock(return_value=("Done with tools.", tool_results))
 
@@ -252,7 +252,34 @@ async def test_run_turn_with_tool_calls(mock_cognitive, mock_settings):
         _, _, turn_result, _ = mock_cognitive.post_turn_calls[0]
         assert len(turn_result.tool_results) == 2
         assert turn_result.tool_results[0].tool_name == "record_decision"
+        assert turn_result.tool_results[0].result is not None
+        assert "Decision recorded" in turn_result.tool_results[0].result
         assert turn_result.tool_results[1].tool_name == "learn_fact"
+        assert turn_result.tool_results[1].result is not None
+    finally:
+        await r.close()
+
+
+async def test_run_turn_with_tool_error(mock_cognitive, mock_settings):
+    """Tool error captured in ToolResult.error field."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    tool_results = [
+        ToolResult(tool_name="record_decision", arguments={"description": "bad"}, error="Error recording decision: validation failed"),
+    ]
+    r._call_sdk = AsyncMock(return_value=("Tool had an error.", tool_results))
+
+    try:
+        session_id = f"test-tool-err-{uuid.uuid4().hex[:8]}"
+        response_text, _ = await r.run_turn(session_id, "Try something broken")
+
+        assert len(mock_cognitive.post_turn_calls) == 1
+        _, _, turn_result, _ = mock_cognitive.post_turn_calls[0]
+        assert len(turn_result.tool_results) == 1
+        assert turn_result.tool_results[0].error is not None
+        assert "validation failed" in turn_result.tool_results[0].error
     finally:
         await r.close()
 
@@ -430,6 +457,24 @@ async def test_start_credentials(mock_cognitive, mock_settings):
         os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
         await r3.start()  # Should not raise, just log warning
         await r3.close()
+
+
+async def test_permission_mode_from_settings(mock_cognitive):
+    """Runner uses sdk_permission_mode from settings, not hardcoded value."""
+    brain = MockBrain()
+    heart = MockHeart()
+    settings = Settings(
+        ANTHROPIC_API_KEY="test-key",
+        agent_id="test-agent",
+        sdk_permission_mode="default",
+    )
+    r = AgentRunner(mock_cognitive, brain, heart, settings)
+    r._call_sdk = AsyncMock(return_value=("OK", []))
+
+    try:
+        assert r._settings.sdk_permission_mode == "default"
+    finally:
+        await r.close()
 
 
 async def test_lru_eviction(mock_cognitive, mock_settings):

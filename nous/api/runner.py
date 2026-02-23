@@ -217,6 +217,7 @@ class AgentRunner:
             ClaudeAgentOptions,
             ResultMessage,
             TextBlock,
+            ToolResultBlock,
             ToolUseBlock,
             query,
         )
@@ -225,7 +226,7 @@ class AgentRunner:
             system_prompt=system_prompt,
             model=self._settings.model,
             max_turns=self._settings.sdk_max_turns,
-            permission_mode="bypassPermissions",
+            permission_mode=self._settings.sdk_permission_mode,
         )
 
         # Register in-process MCP server if available
@@ -234,6 +235,8 @@ class AgentRunner:
 
         response_text_parts: list[str] = []
         tool_results: list[ToolResult] = []
+        # Map tool_use_id -> index in tool_results for attaching results
+        _tool_use_index: dict[str, int] = {}
 
         async for message in query(prompt=user_message, options=options):
             if isinstance(message, AssistantMessage):
@@ -241,13 +244,24 @@ class AgentRunner:
                     if isinstance(block, TextBlock):
                         response_text_parts.append(block.text)
                     elif isinstance(block, ToolUseBlock):
-                        # Record tool call for TurnResult tracking
+                        _tool_use_index[block.id] = len(tool_results)
                         tool_results.append(
                             ToolResult(
                                 tool_name=block.name,
                                 arguments=block.input,
                             )
                         )
+                    elif isinstance(block, ToolResultBlock):
+                        idx = _tool_use_index.get(block.tool_use_id)
+                        if idx is not None:
+                            content = block.content
+                            if isinstance(content, list):
+                                content = "\n".join(
+                                    item.get("text", "") for item in content if isinstance(item, dict)
+                                )
+                            tool_results[idx].result = content or None
+                            if block.is_error:
+                                tool_results[idx].error = content or "tool error"
             elif isinstance(message, ResultMessage):
                 if message.is_error:
                     raise RuntimeError(
