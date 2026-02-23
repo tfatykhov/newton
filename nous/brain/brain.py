@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -175,15 +175,17 @@ class Brain:
         description: str | None = None,
         context: str | None = None,
         pattern: str | None = None,
+        confidence: float | None = None,
+        tags: list[str] | None = None,
         session: AsyncSession | None = None,
     ) -> DecisionDetail:
-        """Update a decision's description, context, or pattern."""
+        """Update a decision's description, context, pattern, confidence, or tags."""
         if session is None:
             async with self.db.session() as session:
-                result = await self._update(decision_id, description, context, pattern, session)
+                result = await self._update(decision_id, description, context, pattern, confidence, tags, session)
                 await session.commit()
                 return result
-        return await self._update(decision_id, description, context, pattern, session)
+        return await self._update(decision_id, description, context, pattern, confidence, tags, session)
 
     async def _update(
         self,
@@ -191,13 +193,14 @@ class Brain:
         description: str | None,
         context: str | None,
         pattern: str | None,
+        confidence: float | None,
+        tags: list[str] | None,
         session: AsyncSession,
     ) -> DecisionDetail:
         """Internal update implementation.
 
-        P2-7: Does NOT re-compute quality based on tags/reasons (they can't
-        change via update). Re-computes quality using current tags/reasons with
-        the updated description/context/pattern fields.
+        Re-computes quality using current tags/reasons with the updated fields.
+        When tags are provided, replaces existing DecisionTag rows entirely.
         """
         decision = await self._get_decision_orm(decision_id, session)
         if decision is None:
@@ -213,12 +216,22 @@ class Brain:
         if pattern is not None:
             decision.pattern = pattern
             changed = True
+        if confidence is not None:
+            decision.confidence = confidence
+            changed = True
+        if tags is not None:
+            # Replace existing tags: delete old, insert new
+            await session.execute(
+                delete(DecisionTag).where(DecisionTag.decision_id == decision_id)
+            )
+            decision.tags = [DecisionTag(tag=t) for t in tags]
+            changed = True
 
         if not changed:
             return self._decision_to_detail(decision)
 
         # Re-compute quality with updated fields + current tags/reasons
-        current_tags = [t.tag for t in decision.tags]
+        current_tags = tags if tags is not None else [t.tag for t in decision.tags]
         current_reasons = [{"type": r.type, "text": r.text} for r in decision.reasons]
         decision.quality_score = self.quality.compute(
             tags=current_tags,
