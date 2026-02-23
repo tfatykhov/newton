@@ -128,8 +128,17 @@ class AgentRunner:
         _agent_id = agent_id or self._settings.agent_id
         conversation = self._get_or_create_conversation(session_id)
 
-        # 2. Pre-turn
-        turn_context = await self._cognitive.pre_turn(_agent_id, session_id, user_message)
+        # 2. Pre-turn (F4: plumb conversation_messages for dedup)
+        # Filter to user messages first, then take last 8 (D7: window = user turns)
+        recent_messages = [
+            m.content for m in conversation.messages if m.role == "user"
+        ][-8:]
+        turn_context = await self._cognitive.pre_turn(
+            _agent_id,
+            session_id,
+            user_message,
+            conversation_messages=recent_messages or None,
+        )
 
         # 3. Append user message
         conversation.messages.append(Message(role="user", content=user_message))

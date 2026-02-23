@@ -17,10 +17,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.brain import Brain
 from nous.cognitive.context import ContextEngine
+from nous.cognitive.dedup import ConversationDeduplicator
 from nous.cognitive.deliberation import DeliberationEngine
 from nous.cognitive.frames import FrameEngine
+from nous.cognitive.intent import IntentClassifier
 from nous.cognitive.monitor import MonitorEngine
 from nous.cognitive.schemas import Assessment, TurnContext, TurnResult
+from nous.cognitive.usage_tracker import UsageTracker
 from nous.config import Settings
 from nous.heart.heart import Heart
 from nous.heart.schemas import EpisodeInput, FactInput
@@ -62,7 +65,16 @@ class CognitiveLayer:
         self._settings = settings
         # P1-1: Use brain.db (public), not brain._db
         self._frames = FrameEngine(brain.db, settings)
-        self._context = ContextEngine(brain, heart, settings, identity_prompt)
+        # F3: Instantiate IntentClassifier and UsageTracker
+        self._intent_classifier = IntentClassifier()
+        self._usage_tracker = UsageTracker()
+        # F14: Pass EmbeddingProvider from brain.embeddings to deduplicator
+        _deduplicator = ConversationDeduplicator(
+            embedding_provider=brain.embeddings,
+        )
+        self._context = ContextEngine(
+            brain, heart, settings, identity_prompt, deduplicator=_deduplicator
+        )
         self._deliberation = DeliberationEngine(brain)
         self._monitor = MonitorEngine(brain, heart, settings)
 
@@ -83,37 +95,65 @@ class CognitiveLayer:
         session_id: str,
         user_input: str,
         session: AsyncSession | None = None,
+        *,
+        conversation_messages: list[str] | None = None,
     ) -> TurnContext:
         """SENSE -> FRAME -> RECALL -> DELIBERATE — prepare for LLM turn.
 
         Steps:
         1. SENSE: Receive user_input (passed in)
         2. FRAME: Select cognitive frame via FrameEngine.select()
-        3. RECALL: Build context via ContextEngine.build()
+        2b. CLASSIFY: Extract intent signals and plan retrieval (005.1)
+        3. RECALL: Build context via ContextEngine.build() with plan
         4. DELIBERATE: If frame warrants it (decision/task/debug),
            start deliberation and record decision_id
         5. EPISODE: If no active episode for this session, start one
         6. WORKING MEMORY: Update via Heart.focus()
 
         Return TurnContext with system_prompt, frame, decision_id, metadata.
+
+        Args:
+            conversation_messages: Recent user messages for dedup (F4).
+                Optional — without it, dedup is skipped (backward compat).
         """
-        # 2. FRAME — select cognitive frame
+        # 2. FRAME — select cognitive frame (F5: agent_id first)
         try:
             frame = await self._frames.select(agent_id, user_input, session=session)
         except Exception:
             logger.warning("Frame selection failed, falling back to conversation")
             frame = self._frames._default_selection()
 
-        # 3. RECALL — build context
+        # 2b. CLASSIFY — extract intent signals and plan retrieval (005.1)
+        signals = self._intent_classifier.classify(user_input, frame)
+        plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
+
+        # 3. RECALL — build context with intent-driven plan
         system_prompt = ""
         recalled_decision_ids: list[str] = []
         recalled_fact_ids: list[str] = []
+        recalled_procedure_ids: list[str] = []
+        recalled_episode_ids: list[str] = []
+        recalled_content_map: dict[str, str] = {}
         context_token_estimate = 0
         try:
-            system_prompt, sections = await self._context.build(
-                agent_id, session_id, user_input, frame, session=session
+            build_result = await self._context.build(
+                agent_id,
+                session_id,
+                user_input,
+                frame,
+                session=session,
+                conversation_messages=conversation_messages,
+                retrieval_plan=plan,
+                usage_tracker=self._usage_tracker,
             )
-            context_token_estimate = sum(s.token_estimate for s in sections)
+            system_prompt = build_result.system_prompt
+            context_token_estimate = sum(s.token_estimate for s in build_result.sections)
+            # F1: Extract recalled IDs from BuildResult
+            recalled_decision_ids = build_result.recalled_ids.get("decision", [])
+            recalled_fact_ids = build_result.recalled_ids.get("fact", [])
+            recalled_procedure_ids = build_result.recalled_ids.get("procedure", [])
+            recalled_episode_ids = build_result.recalled_ids.get("episode", [])
+            recalled_content_map = build_result.recalled_content_map
         except Exception:
             logger.warning("Context build failed, using identity prompt only")
             system_prompt = self._context._identity_prompt or ""
@@ -165,6 +205,9 @@ class CognitiveLayer:
             context_token_estimate=context_token_estimate,
             recalled_decision_ids=recalled_decision_ids,
             recalled_fact_ids=recalled_fact_ids,
+            recalled_procedure_ids=recalled_procedure_ids,
+            recalled_episode_ids=recalled_episode_ids,
+            recalled_content_map=recalled_content_map,
         )
 
     async def post_turn(
@@ -236,7 +279,34 @@ class CognitiveLayer:
             except Exception:
                 logger.warning("Failed to finalize deliberation for %s", decision_id)
 
-        # 4. EMIT EVENT — P2-7: delegate to Brain.emit_event()
+        # 4. USAGE TRACKING — record which recalled memories were referenced (005.1)
+        if self._usage_tracker and turn_context.recalled_content_map:
+            response_text = turn_result.response_text
+            _all_recalled: list[tuple[str, str, str]] = []  # (memory_id, memory_type, content)
+            for mid in turn_context.recalled_decision_ids:
+                content = turn_context.recalled_content_map.get(mid, "")
+                _all_recalled.append((mid, "decision", content))
+            for mid in turn_context.recalled_fact_ids:
+                content = turn_context.recalled_content_map.get(mid, "")
+                _all_recalled.append((mid, "fact", content))
+            for mid in turn_context.recalled_procedure_ids:
+                content = turn_context.recalled_content_map.get(mid, "")
+                _all_recalled.append((mid, "procedure", content))
+            for mid in turn_context.recalled_episode_ids:
+                content = turn_context.recalled_content_map.get(mid, "")
+                _all_recalled.append((mid, "episode", content))
+
+            for mid, mem_type, content in _all_recalled:
+                if content:
+                    overlap = UsageTracker.compute_overlap(content, response_text)
+                    self._usage_tracker.record_retrieval(
+                        memory_id=mid,
+                        memory_type=mem_type,
+                        was_referenced=overlap >= 0.15,
+                        overlap_score=overlap,
+                    )
+
+        # 5. EMIT EVENT — P2-7: delegate to Brain.emit_event()
         try:
             await self._brain.emit_event(
                 "turn_completed",
