@@ -94,9 +94,7 @@ class FrameEngine:
 
             if match_count > 0:
                 priority = FRAME_PRIORITY.get(frame.id, 0)
-                if (match_count > best_count) or (
-                    match_count == best_count and priority > best_priority
-                ):
+                if (match_count > best_count) or (match_count == best_count and priority > best_priority):
                     best_frame = frame
                     best_count = match_count
                     best_priority = priority
@@ -131,9 +129,7 @@ class FrameEngine:
         agent_id: str,
         session: AsyncSession,
     ) -> FrameSelection:
-        result = await session.execute(
-            select(Frame).where(Frame.id == frame_id, Frame.agent_id == agent_id)
-        )
+        result = await session.execute(select(Frame).where(Frame.id == frame_id, Frame.agent_id == agent_id))
         frame = result.scalars().first()
         if frame is None:
             raise ValueError(f"Frame '{frame_id}' not found for agent '{agent_id}'")
@@ -173,9 +169,7 @@ class FrameEngine:
         frame.last_used = datetime.now(UTC)
         await session.flush()
 
-    def _frame_to_selection(
-        self, frame: Frame, match_method: str, confidence: float
-    ) -> FrameSelection:
+    def _frame_to_selection(self, frame: Frame, match_method: str, confidence: float) -> FrameSelection:
         return FrameSelection(
             frame_id=frame.id,
             frame_name=frame.name,

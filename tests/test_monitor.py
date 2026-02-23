@@ -11,7 +11,6 @@ Key plan adjustments applied:
 - P2-4: censor deduplication before creating
 """
 
-
 import pytest_asyncio
 
 from nous.brain.brain import Brain
@@ -72,9 +71,7 @@ def _record_input(**overrides) -> RecordInput:
 async def test_assess_no_errors(monitor, session):
     """No errors -> surprise_level=0.0."""
     turn_result = TurnResult(response_text="Task completed successfully.")
-    assessment = await monitor.assess(
-        "nous-default", "session-1", turn_result, session=session
-    )
+    assessment = await monitor.assess("nous-default", "session-1", turn_result, session=session)
 
     assert isinstance(assessment, Assessment)
     assert assessment.surprise_level == 0.0
@@ -98,9 +95,7 @@ async def test_assess_tool_error(monitor, session):
             )
         ],
     )
-    assessment = await monitor.assess(
-        "nous-default", "session-1", turn_result, session=session
-    )
+    assessment = await monitor.assess("nous-default", "session-1", turn_result, session=session)
 
     assert assessment.surprise_level >= 0.3
     assert len(assessment.censor_candidates) >= 1
@@ -118,9 +113,7 @@ async def test_assess_turn_error(monitor, session):
         response_text="",
         error="LLM context window exceeded",
     )
-    assessment = await monitor.assess(
-        "nous-default", "session-1", turn_result, session=session
-    )
+    assessment = await monitor.assess("nous-default", "session-1", turn_result, session=session)
 
     assert assessment.surprise_level >= 0.9
 
@@ -142,9 +135,7 @@ async def test_transient_error_no_censor(monitor, session):
             )
         ],
     )
-    assessment = await monitor.assess(
-        "nous-default", "session-1", turn_result, session=session
-    )
+    assessment = await monitor.assess("nous-default", "session-1", turn_result, session=session)
 
     # Transient error should NOT generate censor candidates
     assert len(assessment.censor_candidates) == 0
@@ -162,9 +153,7 @@ async def test_transient_429_no_censor(monitor, session):
             )
         ],
     )
-    assessment = await monitor.assess(
-        "nous-default", "session-1", turn_result, session=session
-    )
+    assessment = await monitor.assess("nous-default", "session-1", turn_result, session=session)
     assert len(assessment.censor_candidates) == 0
 
 
@@ -192,9 +181,7 @@ async def test_learn_creates_censors(monitor, heart, session):
     )
     frame = _frame()
 
-    await monitor.learn(
-        "nous-default", "session-1", assessment, turn_result, frame, session=session
-    )
+    await monitor.learn("nous-default", "session-1", assessment, turn_result, frame, session=session)
 
     # Censor should have been created
     censors = await heart.list_censors(session=session)
@@ -220,8 +207,13 @@ async def test_learn_does_not_end_episode(monitor, heart, session):
     frame = _frame()
 
     await monitor.learn(
-        "nous-default", "session-1", assessment, turn_result, frame,
-        episode_id=str(episode.id), session=session,
+        "nous-default",
+        "session-1",
+        assessment,
+        turn_result,
+        frame,
+        episode_id=str(episode.id),
+        session=session,
     )
 
     # Episode should still be open (not ended)
@@ -236,9 +228,7 @@ async def test_learn_does_not_end_episode(monitor, heart, session):
 
 async def test_learn_records_thought_on_success(monitor, brain, session):
     """If decision_id exists and no errors, records a thought."""
-    decision = await brain.record(
-        _record_input(), session=session
-    )
+    decision = await brain.record(_record_input(), session=session)
 
     assessment = Assessment(
         actual="Success",
@@ -249,7 +239,11 @@ async def test_learn_records_thought_on_success(monitor, brain, session):
     frame = _frame()
 
     await monitor.learn(
-        "nous-default", "session-1", assessment, turn_result, frame,
+        "nous-default",
+        "session-1",
+        assessment,
+        turn_result,
+        frame,
         session=session,
     )
 

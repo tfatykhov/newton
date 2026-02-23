@@ -159,9 +159,7 @@ async def test_build_includes_identity(context_engine, brain, heart, session):
     sid = f"test-ctx-identity-{uuid.uuid4().hex[:8]}"
     await heart.get_or_create_working_memory(sid, session=session)
 
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "build something", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "build something", frame, session=session)
 
     assert "Nous" in prompt or "thinking agent" in prompt
     assert len(prompt) > 0
@@ -179,14 +177,10 @@ async def test_build_includes_censors(context_engine, brain, heart, session):
     sid = f"test-ctx-censors-{uuid.uuid4().hex[:8]}"
     await heart.get_or_create_working_memory(sid, session=session)
 
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "do something dangerous", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "do something dangerous", frame, session=session)
 
     # Censor should appear somewhere in the prompt
-    assert "dangerous operation" in prompt.lower() or any(
-        "censor" in s.label.lower() for s in sections
-    )
+    assert "dangerous operation" in prompt.lower() or any("censor" in s.label.lower() for s in sections)
 
 
 # ---------------------------------------------------------------------------
@@ -216,9 +210,7 @@ async def test_build_skips_zero_budget(context_engine, brain, heart, session):
     sid = f"test-ctx-skip-{uuid.uuid4().hex[:8]}"
     await heart.get_or_create_working_memory(sid, session=session)
 
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "hello there", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "hello there", frame, session=session)
 
     # Procedures section should not be present (budget=0)
     procedure_sections = [s for s in sections if "procedure" in s.label.lower()]
@@ -237,9 +229,7 @@ async def test_build_with_decisions(context_engine, brain, heart, session):
     sid = f"test-ctx-decisions-{uuid.uuid4().hex[:8]}"
     await heart.get_or_create_working_memory(sid, session=session)
 
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "context test decision", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "context test decision", frame, session=session)
 
     # Decisions section should appear with seeded data
     decision_sections = [s for s in sections if "decision" in s.label.lower()]
@@ -259,9 +249,7 @@ async def test_build_with_facts(context_engine, brain, heart, session):
     sid = f"test-ctx-facts-{uuid.uuid4().hex[:8]}"
     await heart.get_or_create_working_memory(sid, session=session)
 
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "context test fact", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "context test fact", frame, session=session)
 
     fact_sections = [s for s in sections if "fact" in s.label.lower()]
     if fact_sections:
@@ -280,9 +268,7 @@ async def test_build_with_working_memory(context_engine, brain, heart, session):
     await heart.focus(sid, task="Build the REST API", frame="task", session=session)
 
     frame = _frame_selection()
-    prompt, sections = await context_engine.build(
-        "nous-default", sid, "continue building", frame, session=session
-    )
+    prompt, sections = await context_engine.build("nous-default", sid, "continue building", frame, session=session)
 
     wm_sections = [s for s in sections if "working" in s.label.lower() or "memory" in s.label.lower()]
     if wm_sections:
@@ -302,9 +288,7 @@ async def test_refresh_needed_frame_change(context_engine, heart, session):
 
     # Now check with a different frame
     new_frame = _frame_selection("task")
-    result = await context_engine.refresh_needed(
-        "nous-default", sid, "build something", new_frame, session=session
-    )
+    result = await context_engine.refresh_needed("nous-default", sid, "build something", new_frame, session=session)
     assert result is True
 
 
@@ -320,9 +304,7 @@ async def test_refresh_needed_same_frame(context_engine, heart, session):
     await heart.focus(sid, task="current task", frame="task", session=session)
 
     frame = _frame_selection("task")
-    result = await context_engine.refresh_needed(
-        "nous-default", sid, "more work", frame, session=session
-    )
+    result = await context_engine.refresh_needed("nous-default", sid, "more work", frame, session=session)
     assert result is False
 
 
@@ -338,9 +320,7 @@ async def test_expand_decision(context_engine, brain, session):
         session=session,
     )
 
-    result = await context_engine.expand(
-        "decision", str(decision.id), session=session
-    )
+    result = await context_engine.expand("decision", str(decision.id), session=session)
     assert isinstance(result, str)
     assert len(result) > 0
 

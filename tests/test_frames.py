@@ -99,9 +99,7 @@ async def test_frame_select_tiebreak(frame_engine, session):
 
     Decision has higher priority than debug, so decision wins.
     """
-    result = await frame_engine.select(
-        "nous-default", "should we fix this bug", session=session
-    )
+    result = await frame_engine.select("nous-default", "should we fix this bug", session=session)
     # Both 'should' (decision) and 'bug' (debug) match — decision wins tiebreak
     assert result.frame_id == "decision"
 
@@ -141,9 +139,7 @@ async def test_frame_get(frame_engine, session):
 async def test_frame_usage_count_increments(frame_engine, session):
     """Selecting a frame bumps its usage_count."""
     # Get initial count
-    result = await session.execute(
-        select(Frame).where(Frame.id == "task", Frame.agent_id == "nous-default")
-    )
+    result = await session.execute(select(Frame).where(Frame.id == "task", Frame.agent_id == "nous-default"))
     frame = result.scalar_one()
     initial_count = frame.usage_count or 0
 
@@ -153,8 +149,6 @@ async def test_frame_usage_count_increments(frame_engine, session):
     # Verify count incremented
     await session.flush()
     session.expire_all()
-    result2 = await session.execute(
-        select(Frame).where(Frame.id == "task", Frame.agent_id == "nous-default")
-    )
+    result2 = await session.execute(select(Frame).where(Frame.id == "task", Frame.agent_id == "nous-default"))
     frame2 = result2.scalar_one()
     assert (frame2.usage_count or 0) == initial_count + 1

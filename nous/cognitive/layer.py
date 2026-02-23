@@ -118,9 +118,7 @@ class CognitiveLayer:
         decision_id: str | None = None
         try:
             if await self._deliberation.should_deliberate(frame):
-                decision_id = await self._deliberation.start(
-                    agent_id, user_input[:200], frame, session=session
-                )
+                decision_id = await self._deliberation.start(agent_id, user_input[:200], frame, session=session)
         except Exception:
             logger.warning("Deliberation start failed, continuing without decision_id")
             decision_id = None
@@ -143,9 +141,7 @@ class CognitiveLayer:
         # P1-7: Must call get_or_create before focus
         try:
             await self._heart.get_or_create_working_memory(session_id, session=session)
-            await self._heart.focus(
-                session_id, user_input[:200], frame.frame_id, session=session
-            )
+            await self._heart.focus(session_id, user_input[:200], frame.frame_id, session=session)
         except Exception:
             logger.warning("Failed to update working memory for session %s", session_id)
 
@@ -192,8 +188,11 @@ class CognitiveLayer:
         # 1. MONITOR — assess
         try:
             assessment = await self._monitor.assess(
-                agent_id, session_id, turn_result,
-                decision_id=decision_id, session=session,
+                agent_id,
+                session_id,
+                turn_result,
+                decision_id=decision_id,
+                session=session,
             )
         except Exception:
             logger.warning("Assessment failed, using default")
@@ -202,8 +201,13 @@ class CognitiveLayer:
         # 2. LEARN — extract lessons
         try:
             assessment = await self._monitor.learn(
-                agent_id, session_id, assessment, turn_result,
-                turn_context.frame, episode_id=episode_id, session=session,
+                agent_id,
+                session_id,
+                assessment,
+                turn_result,
+                turn_context.frame,
+                episode_id=episode_id,
+                session=session,
             )
         except Exception:
             logger.warning("Learning failed during post_turn")

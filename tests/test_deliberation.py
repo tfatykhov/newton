@@ -79,9 +79,7 @@ async def test_start_creates_decision(delib, brain, session):
 async def test_start_uses_frame_defaults(delib, brain, session):
     """start() uses frame's default_category and default_stakes."""
     frame = _frame(default_category="tooling", default_stakes="medium")
-    decision_id = await delib.start(
-        "nous-default", "set up CI pipeline", frame, session=session
-    )
+    decision_id = await delib.start("nous-default", "set up CI pipeline", frame, session=session)
 
     detail = await brain.get(uuid.UUID(decision_id), session=session)
     assert detail.category == "tooling"
@@ -98,9 +96,7 @@ async def test_start_uses_frame_defaults(delib, brain, session):
 async def test_think_delegates_to_brain(delib, brain, session):
     """think() records a thought via Brain.think()."""
     frame = _frame()
-    decision_id = await delib.start(
-        "nous-default", "think test", frame, session=session
-    )
+    decision_id = await delib.start("nous-default", "think test", frame, session=session)
 
     await delib.think(decision_id, "Redis is fast but single-threaded", "nous-default", session=session)
 
@@ -120,9 +116,7 @@ async def test_think_delegates_to_brain(delib, brain, session):
 async def test_finalize_updates_decision(delib, brain, session):
     """finalize() updates decision description and confidence via Brain.update()."""
     frame = _frame()
-    decision_id = await delib.start(
-        "nous-default", "finalize test", frame, session=session
-    )
+    decision_id = await delib.start("nous-default", "finalize test", frame, session=session)
 
     await delib.finalize(
         decision_id,

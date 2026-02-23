@@ -67,12 +67,14 @@ class ContextEngine:
         # 1. Identity (always included)
         if self._identity_prompt:
             identity_text = self._truncate_to_budget(self._identity_prompt, budget.identity)
-            sections.append(ContextSection(
-                priority=1,
-                label="Identity",
-                content=identity_text,
-                token_estimate=self._estimate_tokens(identity_text),
-            ))
+            sections.append(
+                ContextSection(
+                    priority=1,
+                    label="Identity",
+                    content=identity_text,
+                    token_estimate=self._estimate_tokens(identity_text),
+                )
+            )
 
         # 2. Censors (P2-5: per-section isolation)
         if budget.censors > 0:
@@ -81,12 +83,14 @@ class ContextEngine:
                 if censors:
                     censor_text = self._format_censors(censors)
                     censor_text = self._truncate_to_budget(censor_text, budget.censors)
-                    sections.append(ContextSection(
-                        priority=2,
-                        label="Active Censors",
-                        content=censor_text,
-                        token_estimate=self._estimate_tokens(censor_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=2,
+                            label="Active Censors",
+                            content=censor_text,
+                            token_estimate=self._estimate_tokens(censor_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Failed to load censors during context build")
 
@@ -94,12 +98,14 @@ class ContextEngine:
         if budget.frame > 0:
             frame_text = self._format_frame(frame)
             frame_text = self._truncate_to_budget(frame_text, budget.frame)
-            sections.append(ContextSection(
-                priority=3,
-                label="Current Frame",
-                content=frame_text,
-                token_estimate=self._estimate_tokens(frame_text),
-            ))
+            sections.append(
+                ContextSection(
+                    priority=3,
+                    label="Current Frame",
+                    content=frame_text,
+                    token_estimate=self._estimate_tokens(frame_text),
+                )
+            )
 
         # 4. Working memory (P1-7: no agent_id param)
         if budget.working_memory > 0:
@@ -108,12 +114,14 @@ class ContextEngine:
                 if wm is not None:
                     wm_text = self._format_working_memory(wm)
                     wm_text = self._truncate_to_budget(wm_text, budget.working_memory)
-                    sections.append(ContextSection(
-                        priority=4,
-                        label="Working Memory",
-                        content=wm_text,
-                        token_estimate=self._estimate_tokens(wm_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=4,
+                            label="Working Memory",
+                            content=wm_text,
+                            token_estimate=self._estimate_tokens(wm_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Failed to load working memory during context build")
 
@@ -124,12 +132,14 @@ class ContextEngine:
                 if decisions:
                     dec_text = self._format_decisions(decisions)
                     dec_text = self._truncate_to_budget(dec_text, budget.decisions)
-                    sections.append(ContextSection(
-                        priority=5,
-                        label="Related Decisions",
-                        content=dec_text,
-                        token_estimate=self._estimate_tokens(dec_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=5,
+                            label="Related Decisions",
+                            content=dec_text,
+                            token_estimate=self._estimate_tokens(dec_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Brain.query failed during context build")
 
@@ -140,12 +150,14 @@ class ContextEngine:
                 if facts:
                     facts_text = self._format_facts(facts)
                     facts_text = self._truncate_to_budget(facts_text, budget.facts)
-                    sections.append(ContextSection(
-                        priority=6,
-                        label="Relevant Facts",
-                        content=facts_text,
-                        token_estimate=self._estimate_tokens(facts_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=6,
+                            label="Relevant Facts",
+                            content=facts_text,
+                            token_estimate=self._estimate_tokens(facts_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Heart.search_facts failed during context build")
 
@@ -156,12 +168,14 @@ class ContextEngine:
                 if procedures:
                     proc_text = self._format_procedures(procedures)
                     proc_text = self._truncate_to_budget(proc_text, budget.procedures)
-                    sections.append(ContextSection(
-                        priority=7,
-                        label="Known Procedures",
-                        content=proc_text,
-                        token_estimate=self._estimate_tokens(proc_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=7,
+                            label="Known Procedures",
+                            content=proc_text,
+                            token_estimate=self._estimate_tokens(proc_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Heart.search_procedures failed during context build")
 
@@ -172,12 +186,14 @@ class ContextEngine:
                 if episodes:
                     ep_text = self._format_episodes(episodes)
                     ep_text = self._truncate_to_budget(ep_text, budget.episodes)
-                    sections.append(ContextSection(
-                        priority=8,
-                        label="Past Episodes",
-                        content=ep_text,
-                        token_estimate=self._estimate_tokens(ep_text),
-                    ))
+                    sections.append(
+                        ContextSection(
+                            priority=8,
+                            label="Past Episodes",
+                            content=ep_text,
+                            token_estimate=self._estimate_tokens(ep_text),
+                        )
+                    )
             except Exception:
                 logger.warning("Heart.search_episodes failed during context build")
 

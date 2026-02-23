@@ -221,9 +221,7 @@ class Brain:
             changed = True
         if tags is not None:
             # Replace existing tags: delete old, insert new
-            await session.execute(
-                delete(DecisionTag).where(DecisionTag.decision_id == decision_id)
-            )
+            await session.execute(delete(DecisionTag).where(DecisionTag.decision_id == decision_id))
             decision.tags = [DecisionTag(tag=t) for t in tags]
             changed = True
 
