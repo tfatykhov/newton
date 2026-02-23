@@ -112,11 +112,12 @@ async def test_seed_guardrails(db):
         )
         guardrails = {row[0]: {"condition": row[1], "severity": row[2]} for row in result}
     assert len(guardrails) == 4
-    assert guardrails["no-high-stakes-low-confidence"]["condition"] == {"stakes": "high", "confidence_lt": 0.5}
+    expected_cel = "decision.stakes == 'high' && decision.confidence < 0.5"
+    assert guardrails["no-high-stakes-low-confidence"]["condition"] == {"cel": expected_cel}
     assert guardrails["no-high-stakes-low-confidence"]["severity"] == "block"
-    assert guardrails["no-critical-without-review"]["condition"] == {"stakes": "critical"}
-    assert guardrails["require-reasons"]["condition"] == {"reason_count_lt": 1}
-    assert guardrails["low-quality-recording"]["condition"] == {"quality_lt": 0.5}
+    assert guardrails["no-critical-without-review"]["condition"] == {"cel": "decision.stakes == 'critical'"}
+    assert guardrails["require-reasons"]["condition"] == {"cel": "decision.reason_count < 1"}
+    assert guardrails["low-quality-recording"]["condition"] == {"cel": "decision.quality_score < 0.5"}
 
 
 async def test_updated_at_trigger(session):

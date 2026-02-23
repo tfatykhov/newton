@@ -536,14 +536,14 @@ async def test_cel_reasons_access(session, engine):
     """CEL can access individual reasons with type and text."""
     guardrail = Guardrail(
         agent_id="test-cel-reasons-agent",
-        name="require-analysis-reason",
-        condition={"cel": "size([r for r in decision.reasons if r.type == 'analysis']) == 0"},
+        name="require-multiple-reasons",
+        condition={"cel": "decision.reason_count < 2"},
         severity="warn",
     )
     session.add(guardrail)
     await session.flush()
 
-    # Should warn: no analysis reason
+    # Should warn: only 1 reason
     result = await engine.check(
         session,
         agent_id="test-cel-reasons-agent",
@@ -555,9 +555,9 @@ async def test_cel_reasons_access(session, engine):
         ],
     )
     assert result.allowed
-    assert "require-analysis-reason" in result.warnings
+    assert "require-multiple-reasons" in result.warnings
 
-    # Should not warn: has analysis reason
+    # Should not warn: has 2 reasons
     result_ok = await engine.check(
         session,
         agent_id="test-cel-reasons-agent",
@@ -566,9 +566,10 @@ async def test_cel_reasons_access(session, engine):
         confidence=0.9,
         reasons=[
             {"type": "analysis", "text": "analytical reason"},
+            {"type": "intuition", "text": "gut feeling"},
         ],
     )
-    assert "require-analysis-reason" not in result_ok.warnings
+    assert "require-multiple-reasons" not in result_ok.warnings
 
 
 async def test_cel_evaluation_timeout(engine):
