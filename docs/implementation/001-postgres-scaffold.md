@@ -1,6 +1,6 @@
 # 001: Foundation — Postgres + Project Scaffold
 
-**Status:** Ready to Build
+**Status:** Shipped (PR #1)
 **Priority:** P0 — Everything depends on this
 **Estimated Effort:** 4-6 hours
 **Prerequisites:** None
