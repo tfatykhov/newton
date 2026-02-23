@@ -20,7 +20,7 @@ from nous.cognitive.context import ContextEngine
 from nous.cognitive.deliberation import DeliberationEngine
 from nous.cognitive.frames import FrameEngine
 from nous.cognitive.monitor import MonitorEngine
-from nous.cognitive.schemas import Assessment, FrameSelection, TurnContext, TurnResult
+from nous.cognitive.schemas import Assessment, TurnContext, TurnResult
 from nous.config import Settings
 from nous.heart.heart import Heart
 from nous.heart.schemas import EpisodeInput, FactInput

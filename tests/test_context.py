@@ -7,17 +7,13 @@ to test realistic context assembly.
 
 import uuid
 
-import pytest
 import pytest_asyncio
-from sqlalchemy import select
 
 from nous.brain.brain import Brain
 from nous.brain.schemas import ReasonInput, RecordInput
 from nous.cognitive.context import ContextEngine
-from nous.cognitive.schemas import ContextBudget, ContextSection, FrameSelection
-from nous.config import Settings
+from nous.cognitive.schemas import ContextBudget, FrameSelection
 from nous.heart import CensorInput, FactInput, ProcedureInput
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

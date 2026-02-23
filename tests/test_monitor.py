@@ -11,18 +11,14 @@ Key plan adjustments applied:
 - P2-4: censor deduplication before creating
 """
 
-import uuid
 
-import pytest
 import pytest_asyncio
 
 from nous.brain.brain import Brain
 from nous.brain.schemas import ReasonInput, RecordInput
 from nous.cognitive.monitor import MonitorEngine
 from nous.cognitive.schemas import Assessment, FrameSelection, ToolResult, TurnResult
-from nous.config import Settings
-from nous.heart import CensorInput, EpisodeInput
-
+from nous.heart import EpisodeInput
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -196,7 +192,7 @@ async def test_learn_creates_censors(monitor, heart, session):
     )
     frame = _frame()
 
-    updated = await monitor.learn(
+    await monitor.learn(
         "nous-default", "session-1", assessment, turn_result, frame, session=session
     )
 

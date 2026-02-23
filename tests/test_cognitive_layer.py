@@ -17,7 +17,6 @@ Key plan adjustments applied:
 
 import uuid
 
-import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
@@ -26,15 +25,12 @@ from nous.brain.schemas import ReasonInput, RecordInput
 from nous.cognitive.layer import CognitiveLayer
 from nous.cognitive.schemas import (
     Assessment,
-    FrameSelection,
     ToolResult,
     TurnContext,
     TurnResult,
 )
-from nous.config import Settings
-from nous.heart import CensorInput, EpisodeInput, FactInput, ProcedureInput
+from nous.heart import CensorInput, FactInput, ProcedureInput
 from nous.storage.models import Event
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

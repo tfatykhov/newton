@@ -4,15 +4,12 @@ All tests use real Postgres via the SAVEPOINT fixture from conftest.py.
 Frames are pre-seeded in seed.sql (6 default frames for nous-default agent).
 """
 
-import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 from nous.cognitive.frames import FrameEngine
 from nous.cognitive.schemas import FrameSelection
-from nous.config import Settings
 from nous.storage.models import Frame
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
