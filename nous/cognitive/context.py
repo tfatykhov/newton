@@ -15,7 +15,6 @@ from nous.brain.brain import Brain
 from nous.cognitive.schemas import ContextBudget, ContextSection, FrameSelection
 from nous.config import Settings
 from nous.heart.heart import Heart
-from nous.heart.search import apply_frame_boost
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,6 @@ class ContextEngine:
         """
         budget = ContextBudget.for_frame(frame.frame_id)
         sections: list[ContextSection] = []
-        _active_censor_names: list[str] = []  # Populated in step 2, used for frame boost
 
         # 1. Identity (always included)
         if self._identity_prompt:
@@ -83,7 +81,6 @@ class ContextEngine:
             try:
                 censors = await self._heart.list_censors(session=session)
                 if censors:
-                    _active_censor_names = [getattr(c, "trigger_pattern", "") for c in censors]
                     censor_text = self._format_censors(censors)
                     censor_text = self._truncate_to_budget(censor_text, budget.censors)
                     sections.append(
@@ -151,7 +148,6 @@ class ContextEngine:
             try:
                 facts = await self._heart.search_facts(input_text, limit=5, session=session)
                 if facts:
-                    facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
                     facts_text = self._format_facts(facts)
                     facts_text = self._truncate_to_budget(facts_text, budget.facts)
                     sections.append(
@@ -170,7 +166,6 @@ class ContextEngine:
             try:
                 procedures = await self._heart.search_procedures(input_text, limit=5, session=session)
                 if procedures:
-                    procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
                     proc_text = self._format_procedures(procedures)
                     proc_text = self._truncate_to_budget(proc_text, budget.procedures)
                     sections.append(
@@ -189,7 +184,6 @@ class ContextEngine:
             try:
                 episodes = await self._heart.search_episodes(input_text, limit=5, session=session)
                 if episodes:
-                    episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
                     ep_text = self._format_episodes(episodes)
                     ep_text = self._truncate_to_budget(ep_text, budget.episodes)
                     sections.append(

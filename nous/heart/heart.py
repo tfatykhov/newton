@@ -167,23 +167,9 @@ class Heart:
         self,
         input: FactInput,
         session: AsyncSession | None = None,
-        encoded_frame: str | None = None,
-        encoded_censors: list[str] | None = None,
     ) -> FactDetail:
-        """Store a new fact with deduplication.
-
-        Args:
-            input: Fact data.
-            session: Optional DB session.
-            encoded_frame: Active frame when fact was learned (003.2).
-            encoded_censors: Active censors when fact was learned (003.2).
-        """
-        return await self.facts.learn(
-            input,
-            session=session,
-            encoded_frame=encoded_frame,
-            encoded_censors=encoded_censors,
-        )
+        """Store a new fact with deduplication."""
+        return await self.facts.learn(input, session=session)
 
     async def confirm_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Confirm a fact is still true."""

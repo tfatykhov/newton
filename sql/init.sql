@@ -224,8 +224,6 @@ CREATE TABLE heart.episodes (
         to_tsvector('english', COALESCE(title, '') || ' ' || summary)
     ) STORED,
     active BOOLEAN DEFAULT TRUE,
-    encoded_censors JSONB,
-    compression_tier VARCHAR(20) DEFAULT 'raw',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -262,13 +260,9 @@ CREATE TABLE heart.facts (
         to_tsvector('english', content || ' ' || COALESCE(subject, ''))
     ) STORED,
     active BOOLEAN DEFAULT TRUE,
-    encoded_frame VARCHAR(100),
-    encoded_censors JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-CREATE INDEX idx_facts_encoded_frame ON heart.facts (encoded_frame) WHERE encoded_frame IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- heart.procedures — K-lines with level-bands
@@ -297,13 +291,9 @@ CREATE TABLE heart.procedures (
         to_tsvector('english', name || ' ' || COALESCE(description, ''))
     ) STORED,
     active BOOLEAN DEFAULT TRUE,
-    encoded_frame VARCHAR(100),
-    encoded_censors JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-
-CREATE INDEX idx_procedures_encoded_frame ON heart.procedures (encoded_frame) WHERE encoded_frame IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- heart.episode_procedures — links episodes to procedures with effectiveness
