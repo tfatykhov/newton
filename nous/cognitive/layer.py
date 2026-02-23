@@ -277,7 +277,7 @@ class CognitiveLayer:
                 # P1-8: No summary param on end()
                 await self._heart.end_episode(
                     UUID(episode_id),
-                    outcome="completed",
+                    outcome="success",
                     lessons_learned=lessons,
                     session=session,
                 )
