@@ -55,7 +55,13 @@ Add runtime-specific settings to the existing Settings class.
     # Runtime
     host: str = "0.0.0.0"
     port: int = 8000
+
+    # Anthropic Auth — two modes:
+    # 1. Direct API key (pay-per-token): set ANTHROPIC_API_KEY
+    # 2. Subscription token (Pro/Max plan): set ANTHROPIC_AUTH_TOKEN
+    # If both set, auth_token takes precedence.
     anthropic_api_key: str = Field("", validation_alias="ANTHROPIC_API_KEY")
+    anthropic_auth_token: str = Field("", validation_alias="ANTHROPIC_AUTH_TOKEN")
 
     # Agent identity
     agent_name: str = "Nous"
@@ -134,14 +140,34 @@ class AgentRunner:
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
-        """Initialize the HTTP client for Anthropic API."""
+        """Initialize the HTTP client for Anthropic API.
+
+        Supports two auth modes:
+        1. Subscription token (Pro/Max): Authorization: Bearer <token>
+        2. Direct API key: x-api-key: <key>
+
+        If both are set, subscription token takes precedence.
+        """
+        headers = {
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+        if self._settings.anthropic_auth_token:
+            # Subscription auth (Pro/Max plan)
+            headers["Authorization"] = f"Bearer {self._settings.anthropic_auth_token}"
+        elif self._settings.anthropic_api_key:
+            # Direct API key auth
+            headers["x-api-key"] = self._settings.anthropic_api_key
+        else:
+            raise RuntimeError(
+                "No Anthropic credentials configured. "
+                "Set ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN."
+            )
+
         self._client = httpx.AsyncClient(
             base_url="https://api.anthropic.com",
-            headers={
-                "x-api-key": self._settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            headers=headers,
             timeout=120.0,
         )
 
@@ -706,7 +732,8 @@ services:
       - DB_USER=nous
       - DB_PASSWORD=${DB_PASSWORD:-nous_dev_password}
       - DB_NAME=nous
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - NOUS_AGENT_ID=${NOUS_AGENT_ID:-nous-default}
       - NOUS_AGENT_NAME=${NOUS_AGENT_NAME:-Nous}
@@ -769,8 +796,11 @@ DB_USER=nous
 DB_PASSWORD=nous_dev_password
 DB_NAME=nous
 
-# LLM
+# LLM — set ONE of these:
+# Direct API key (pay-per-token)
 ANTHROPIC_API_KEY=your_anthropic_key_here
+# OR subscription token (Claude Pro/Max plan API access)
+# ANTHROPIC_AUTH_TOKEN=your_subscription_token_here
 
 # Embeddings (optional — keyword-only search if omitted)
 OPENAI_API_KEY=your_openai_key_here
@@ -800,6 +830,10 @@ NOUS_PORT=8000
 # test_run_turn_history_capped — messages capped at 20
 # test_end_conversation — removes from dict, calls cognitive.end_session()
 # test_end_conversation_nonexistent — doesn't error
+# test_start_with_api_key — x-api-key header set
+# test_start_with_auth_token — Authorization: Bearer header set
+# test_start_with_both — auth_token takes precedence
+# test_start_with_neither — RuntimeError raised
 
 # Mock fixture: MockCognitiveLayer that returns preset TurnContext
 # Mock fixture: httpx.MockTransport returning {"content": [{"text": "response"}]}
@@ -885,7 +919,10 @@ Review this conversation. Summarize briefly:
 4. List any new facts learned as "learned: <fact>" lines (one per line).
 ```
 
-### D10: No HITL approval gates for v0.1.0 (from research/013)
+### D10: Dual Anthropic auth — API key and subscription token
+Support both `ANTHROPIC_API_KEY` (direct pay-per-token via `x-api-key` header) and `ANTHROPIC_AUTH_TOKEN` (Pro/Max subscription via `Authorization: Bearer` header). If both are set, subscription token takes precedence. This lets users with a Claude subscription use their plan's API access without needing a separate API key. The runner validates at startup that at least one is configured.
+
+### D11: No HITL approval gates for v0.1.0 (from research/013)
 LangChain requires human approval for all memory edits (attack vector mitigation). We skip this for v0.1.0 — all Heart writes are immediate. For v0.2.0: censors with severity="block" and new procedures should queue for approval. The REST API will need a `/pending-approvals` endpoint and the Heart modules will need a `requires_approval` flag.
 
 ## Error Handling
