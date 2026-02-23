@@ -5,18 +5,18 @@
 ### P0: Core Architecture
 | Feature | Name | Status | Description |
 |---------|------|--------|-------------|
-| F001 | [Brain Module](F001-brain-module.md) | Planned | Decision intelligence — recording, deliberation, calibration, guardrails, graph |
-| F002 | [Heart Module](F002-heart-module.md) | Planned | Memory system — episodic, semantic, procedural, working, censors |
-| F003 | [Cognitive Layer](F003-cognitive-layer.md) | Planned | The Nous Loop — frames, recall, deliberation, monitoring |
-| F004 | [Runtime](F004-runtime.md) | Planned | Docker container, REST API, MCP interface, project structure |
-| F005 | [Context Engine](F005-context-engine.md) | Planned | Frame-adaptive context assembly with token budgets and 3-tier summarization |
+| F001 | [Brain Module](F001-brain-module.md) | Shipped | Decision intelligence — recording, deliberation, calibration, guardrails, graph |
+| F002 | [Heart Module](F002-heart-module.md) | Shipped | Memory system — episodic, semantic, procedural, working, censors |
+| F003 | [Cognitive Layer](F003-cognitive-layer.md) | Spec Ready | The Nous Loop — frames, recall, deliberation, monitoring, end-of-session reflection |
+| F004 | [Runtime](F004-runtime.md) | Spec Ready | Docker container, REST API, MCP interface, project structure |
+| F005 | [Context Engine](F005-context-engine.md) | Merged into F003 | Frame-adaptive context assembly (implemented as `cognitive/context.py`) |
 | F006 | [Event Bus](F006-event-bus.md) | Planned | In-process async event bus, 7 automated handlers, 27/29 actions automatic |
 
 ### P1: Intelligence & Measurement
 | Feature | Name | Status | Description |
 |---------|------|--------|-------------|
 | F007 | [Metrics & Growth](F007-metrics-growth.md) | Planned | 5-level measurement framework, weekly growth reports, automatic tracking |
-| F008 | [Memory Lifecycle](F008-memory-lifecycle.md) | Planned | Auto lifecycle for all memory types — confirm, trim, archive, escalate, retire |
+| F008 | [Memory Lifecycle](F008-memory-lifecycle.md) | Planned | Auto lifecycle for all memory types — confirm, trim, archive, escalate, retire, **generalize** |
 
 ### v0.2.0 Preview (Future)
 | Feature | Name | Description |
@@ -44,6 +44,7 @@
 | [010](../research/010-summarization-strategy.md) | Summarization | 3-tier compression, episode lifecycle |
 | [011](../research/011-measuring-success.md) | Measuring Success | 5-level metrics, growth reports |
 | [012](../research/012-automation-pipeline.md) | Automation Pipeline | Event bus, 7 handlers, full wiring |
+| [013](../research/013-langchain-memory-lessons.md) | LangChain Memory Lessons | 5 takeaways: reflection, generalization, validation, approval gates |
 
 ## Architecture Summary
 

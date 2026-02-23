@@ -1,6 +1,6 @@
 # F001: Brain Module (Decision Intelligence)
 
-**Status:** Planned
+**Status:** Shipped
 **Priority:** P0 — Core organ, everything depends on this
 **Origin:** Cognition Engines principles, reimplemented as embedded library
 

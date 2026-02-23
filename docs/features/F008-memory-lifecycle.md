@@ -94,6 +94,31 @@ No deletion. No archiving. Decisions are permanent. Even failures are valuable t
 - Error during session → marks most recent decision as failed
 - Superseding decision detected → marks earlier as partial
 
+## Fact Generalization (Compaction)
+
+*Added from LangChain Agent Builder memory lessons (research/013)*
+
+**Problem:** Agents accumulate specific facts instead of generalizing. Example: 15 facts about specific vendors to ignore, instead of one rule "ignore cold outreach."
+
+**Solution:** When fact count in a domain exceeds threshold, trigger generalization:
+
+```
+Event: fact_threshold_exceeded (domain has > 10 active facts)
+  ↓
+Handler: generalize_facts
+  1. Load all active facts in domain
+  2. LLM call: "Merge these N specific facts into 1-3 general rules"
+  3. Store general rules as new CORE facts
+  4. Mark originals as SUPERSEDED (superseded_by = general fact ID)
+  5. Log compaction event for metrics
+```
+
+**Trigger:** Event Bus handler (F006) on `fact_learned` when domain count > threshold.
+
+**Validation on write:** Heart.facts.learn() should also check for contradictions:
+- Embedding similarity > 0.9 with existing fact but different content → flag for resolution
+- Surface contradictions back to Cognitive Layer rather than silently storing both
+
 ## Memory Volume Management
 
 Estimated per agent per year: ~80 MB. Postgres handles this trivially.
