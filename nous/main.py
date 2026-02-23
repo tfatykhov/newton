@@ -54,7 +54,7 @@ async def create_components(settings: Settings) -> dict:
     brain = Brain(database, settings, embedding_provider)
     heart = Heart(database, settings, embedding_provider, owns_embeddings=False)  # F4
     cognitive = CognitiveLayer(brain, heart, settings, settings.identity_prompt)
-    runner = AgentRunner(cognitive, settings)
+    runner = AgentRunner(cognitive, brain, heart, settings)
     await runner.start()
 
     return {
@@ -108,6 +108,11 @@ def build_app(settings: Settings) -> Starlette:
         app.state.components = components
 
         logger.info("Nous started: %s (%s)", settings.agent_name, settings.agent_id)
+        logger.info(
+            "SDK: max_turns=%d, workspace=%s",
+            settings.sdk_max_turns,
+            settings.sdk_workspace,
+        )
         yield
 
         # Shutdown (reverse order)
@@ -209,9 +214,12 @@ def main() -> None:
     logger.info("Database: %s:%s/%s", settings.db_host, settings.db_port, settings.db_name)
     logger.info("MCP: %s", "enabled" if settings.mcp_enabled else "disabled")
 
-    # F15: Warn if anthropic_api_key is empty
-    if not settings.anthropic_api_key:
-        logger.warning("ANTHROPIC_API_KEY is not set — /chat endpoints will fail")
+    # F15: Warn if no Anthropic credentials set
+    if not settings.anthropic_api_key and not settings.anthropic_auth_token:
+        logger.warning(
+            "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set — "
+            "/chat endpoints will fail"
+        )
 
     app = build_app(settings)
 

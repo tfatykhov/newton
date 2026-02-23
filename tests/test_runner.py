@@ -1,17 +1,22 @@
 """Unit tests for AgentRunner — the LLM execution loop.
 
-Tests use mock CognitiveLayer and httpx MockTransport to avoid
-real API calls. No database needed for runner tests.
+Tests mock _call_sdk() to avoid real Claude API calls and
+claude_agent_sdk import dependency. MockCognitiveLayer records
+all pre_turn/post_turn/end_session calls for assertions.
 """
 
+import logging
+import os
 import uuid
+from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 import pytest_asyncio
 
-from nous.cognitive.schemas import FrameSelection, TurnContext, TurnResult
+from nous.api.runner import AgentRunner, MAX_CONVERSATIONS
+from nous.cognitive.schemas import FrameSelection, ToolResult, TurnContext, TurnResult
 from nous.config import Settings
+
 
 # ---------------------------------------------------------------------------
 # Mock CognitiveLayer
@@ -19,7 +24,7 @@ from nous.config import Settings
 
 
 class MockCognitiveLayer:
-    """Returns preset TurnContext from pre_turn(), records post_turn()/end_session() calls."""
+    """Returns preset TurnContext from pre_turn(), records all hook calls."""
 
     def __init__(self) -> None:
         self.pre_turn_calls: list[tuple] = []
@@ -56,33 +61,22 @@ class MockCognitiveLayer:
 
 
 # ---------------------------------------------------------------------------
-# Mock Anthropic API transport
+# Mock Brain / Heart (stubs — runner only uses them for MCP server creation)
 # ---------------------------------------------------------------------------
 
 
-def make_mock_transport(response_text: str = "Hello from Nous!", status_code: int = 200):
-    """Create httpx MockTransport simulating Anthropic Messages API."""
+class MockBrain:
+    """Stub Brain for runner constructor."""
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        if status_code != 200:
-            return httpx.Response(
-                status_code=status_code,
-                json={"error": {"type": "server_error", "message": "Internal error"}},
-            )
-        return httpx.Response(
-            status_code=200,
-            json={
-                "id": "msg_test",
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "text", "text": response_text}],
-                "model": "claude-sonnet-4-5-20250514",
-                "stop_reason": "end_turn",
-                "usage": {"input_tokens": 100, "output_tokens": 50},
-            },
-        )
+    async def close(self):
+        pass
 
-    return httpx.MockTransport(handler)
+
+class MockHeart:
+    """Stub Heart for runner constructor."""
+
+    async def close(self):
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -108,41 +102,32 @@ def mock_settings():
 
 @pytest_asyncio.fixture
 async def runner(mock_cognitive, mock_settings):
-    """AgentRunner with mock cognitive layer and mock HTTP transport."""
-    from nous.api.runner import AgentRunner
+    """AgentRunner with mocked _call_sdk (no real SDK dependency).
 
-    r = AgentRunner(mock_cognitive, mock_settings)
-    # Replace the httpx client with one using MockTransport
-    r._client = httpx.AsyncClient(
-        transport=make_mock_transport("Hello from Nous!"),
-        base_url="https://api.anthropic.com",
-        headers={
-            "x-api-key": mock_settings.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        timeout=120.0,
-    )
+    We skip runner.start() since it imports claude_agent_sdk.
+    Instead, we mock _call_sdk directly to return controlled responses.
+    """
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    # Mock _call_sdk to return a simple text response with no tool calls
+    r._call_sdk = AsyncMock(return_value=("Hello from Nous!", []))
+
     yield r
     await r.close()
 
 
 @pytest_asyncio.fixture
 async def runner_error(mock_cognitive, mock_settings):
-    """AgentRunner with API that returns 500 errors."""
-    from nous.api.runner import AgentRunner
+    """AgentRunner where _call_sdk raises an exception."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
 
-    r = AgentRunner(mock_cognitive, mock_settings)
-    r._client = httpx.AsyncClient(
-        transport=make_mock_transport("", status_code=500),
-        base_url="https://api.anthropic.com",
-        headers={
-            "x-api-key": mock_settings.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        timeout=120.0,
-    )
+    # Mock _call_sdk to raise an exception (simulates SDK/API error)
+    r._call_sdk = AsyncMock(side_effect=RuntimeError("SDK query failed: Internal error"))
+
     yield r
     await r.close()
 
@@ -215,20 +200,22 @@ async def test_run_turn_calls_post_turn(runner, mock_cognitive):
 
 
 async def test_run_turn_api_error(runner_error, mock_cognitive):
-    """API 500 -> error message returned, post_turn still called."""
+    """SDK error -> error message returned, post_turn still called with error."""
     session_id = f"test-{uuid.uuid4().hex[:8]}"
     response_text, turn_context = await runner_error.run_turn(session_id, "Hello!")
 
-    # Should return some error indication
-    assert response_text != "" or response_text == ""  # Implementation may vary
-    # post_turn should still be called (per spec)
+    # Should return error fallback message
+    assert "error" in response_text.lower()
+
+    # post_turn should still be called (per spec: always called, even on error)
     assert len(mock_cognitive.post_turn_calls) == 1
     _, _, turn_result, _ = mock_cognitive.post_turn_calls[0]
     assert turn_result.error is not None
+    assert "SDK query failed" in turn_result.error
 
 
 async def test_run_turn_history_capped(runner):
-    """Messages capped at last 20 for API call."""
+    """Messages capped at last 20 for API call via _format_messages."""
     session_id = f"test-{uuid.uuid4().hex[:8]}"
 
     # Send 15 turns (30 messages total)
@@ -239,6 +226,105 @@ async def test_run_turn_history_capped(runner):
     formatted = runner._format_messages(conv)
     # Should be capped at 20 messages
     assert len(formatted) <= 20
+
+
+async def test_run_turn_with_tool_calls(mock_cognitive, mock_settings):
+    """SDK returns tool results, post_turn sees them in TurnResult."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    # Mock _call_sdk to return tool results
+    tool_results = [
+        ToolResult(tool_name="record_decision", arguments={"description": "test"}),
+        ToolResult(tool_name="learn_fact", arguments={"content": "a fact"}),
+    ]
+    r._call_sdk = AsyncMock(return_value=("Done with tools.", tool_results))
+
+    try:
+        session_id = f"test-tools-{uuid.uuid4().hex[:8]}"
+        response_text, _ = await r.run_turn(session_id, "Do something with tools")
+
+        assert response_text == "Done with tools."
+
+        # post_turn should receive the tool results
+        assert len(mock_cognitive.post_turn_calls) == 1
+        _, _, turn_result, _ = mock_cognitive.post_turn_calls[0]
+        assert len(turn_result.tool_results) == 2
+        assert turn_result.tool_results[0].tool_name == "record_decision"
+        assert turn_result.tool_results[1].tool_name == "learn_fact"
+    finally:
+        await r.close()
+
+
+async def test_run_turn_frame_instructions(mock_cognitive, mock_settings):
+    """Decision frame adds 'MUST call record_decision' to system prompt."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    # Set frame to "decision"
+    mock_cognitive.preset_context = TurnContext(
+        system_prompt="You are Nous.",
+        frame=FrameSelection(
+            frame_id="decision",
+            frame_name="Decision",
+            confidence=0.95,
+            match_method="pattern",
+        ),
+        decision_id="test-decision-123",
+        active_censors=[],
+        context_token_estimate=100,
+    )
+
+    r._call_sdk = AsyncMock(return_value=("Decision made.", []))
+
+    try:
+        session_id = f"test-frame-{uuid.uuid4().hex[:8]}"
+        await r.run_turn(session_id, "Should I use caching?")
+
+        # Check that _call_sdk was called with system prompt containing
+        # the decision frame instructions
+        call_args = r._call_sdk.call_args
+        system_prompt = call_args.kwargs.get("system_prompt") or call_args.args[0]
+        assert "MUST call" in system_prompt
+        assert "record_decision" in system_prompt
+    finally:
+        await r.close()
+
+
+async def test_run_turn_safety_net(mock_cognitive, mock_settings, caplog):
+    """Missed record_decision in decision frame -> warning logged."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    # Set frame to "decision" (in _DECISION_FRAMES)
+    mock_cognitive.preset_context = TurnContext(
+        system_prompt="You are Nous.",
+        frame=FrameSelection(
+            frame_id="decision",
+            frame_name="Decision",
+            confidence=0.95,
+            match_method="pattern",
+        ),
+        decision_id="test-decision-456",
+        active_censors=[],
+        context_token_estimate=100,
+    )
+
+    # Return response with NO tool calls (record_decision not called)
+    r._call_sdk = AsyncMock(return_value=("I decided to use caching.", []))
+
+    try:
+        session_id = f"test-safety-{uuid.uuid4().hex[:8]}"
+        with caplog.at_level(logging.WARNING, logger="nous.api.runner"):
+            await r.run_turn(session_id, "Should I use caching?")
+
+        # Safety net should have logged a warning
+        assert any("Safety net" in record.message for record in caplog.records)
+    finally:
+        await r.close()
 
 
 async def test_end_conversation(runner, mock_cognitive):
@@ -255,42 +341,114 @@ async def test_end_conversation(runner, mock_cognitive):
     assert sid == session_id
 
 
+async def test_end_conversation_with_reflection(mock_cognitive, mock_settings):
+    """Conversation with >= 3 turns triggers reflection via _call_sdk."""
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+
+    # Track call count to distinguish turn calls from reflection call
+    call_count = 0
+
+    async def mock_call_sdk(system_prompt, user_message):
+        nonlocal call_count
+        call_count += 1
+        if "reviewing a conversation" in system_prompt.lower():
+            # This is the reflection call
+            return ("Reflection: The task was about testing.", [])
+        return (f"Response {call_count}", [])
+
+    r._call_sdk = mock_call_sdk
+
+    try:
+        session_id = f"test-reflect-{uuid.uuid4().hex[:8]}"
+
+        # Run 3 turns (6 messages: 3 user + 3 assistant)
+        for i in range(3):
+            await r.run_turn(session_id, f"Turn {i + 1}")
+
+        assert len(r._conversations[session_id].messages) == 6
+
+        await r.end_conversation(session_id)
+
+        # end_session should have been called with reflection text
+        assert len(mock_cognitive.end_session_calls) == 1
+        _, _, reflection = mock_cognitive.end_session_calls[0]
+        assert reflection is not None
+        assert "Reflection" in reflection
+    finally:
+        await r.close()
+
+
 async def test_end_conversation_nonexistent(runner, mock_cognitive):
     """Ending nonexistent conversation doesn't error."""
     session_id = f"nonexistent-{uuid.uuid4().hex[:8]}"
     # Should not raise
     await runner.end_conversation(session_id)
+    # end_session should still be called
+    assert len(mock_cognitive.end_session_calls) == 1
+
+
+async def test_start_credentials(mock_cognitive, mock_settings):
+    """start() sets environment variables from settings."""
+    brain = MockBrain()
+    heart = MockHeart()
+
+    # Test api_key only
+    settings_api = Settings(
+        ANTHROPIC_API_KEY="test-api-key-abc",
+        agent_id="test-agent",
+    )
+    r = AgentRunner(mock_cognitive, brain, heart, settings_api)
+
+    with patch("nous.api.runner.AgentRunner._call_sdk"), \
+         patch("nous.api.tools.create_nous_mcp_server", return_value={"type": "sdk"}):
+        await r.start()
+        assert os.environ.get("ANTHROPIC_API_KEY") == "test-api-key-abc"
+        await r.close()
+
+    # Test auth_token takes precedence
+    settings_auth = Settings(
+        ANTHROPIC_API_KEY="test-api-key",
+        ANTHROPIC_AUTH_TOKEN="test-auth-token-xyz",
+        agent_id="test-agent",
+    )
+    r2 = AgentRunner(mock_cognitive, brain, heart, settings_auth)
+
+    with patch("nous.api.tools.create_nous_mcp_server", return_value={"type": "sdk"}):
+        await r2.start()
+        assert os.environ.get("ANTHROPIC_AUTH_TOKEN") == "test-auth-token-xyz"
+        await r2.close()
+
+    # Test neither set -> warning logged
+    settings_none = Settings(agent_id="test-agent")
+    r3 = AgentRunner(mock_cognitive, brain, heart, settings_none)
+
+    with patch("nous.api.tools.create_nous_mcp_server", return_value={"type": "sdk"}):
+        # Remove any leftover env vars
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        await r3.start()  # Should not raise, just log warning
+        await r3.close()
 
 
 async def test_lru_eviction(mock_cognitive, mock_settings):
     """When MAX_CONVERSATIONS exceeded, oldest conversation is evicted."""
-    from nous.api.runner import AgentRunner
-
-    r = AgentRunner(mock_cognitive, mock_settings)
-    r._client = httpx.AsyncClient(
-        transport=make_mock_transport("OK"),
-        base_url="https://api.anthropic.com",
-        headers={
-            "x-api-key": mock_settings.anthropic_api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        timeout=120.0,
-    )
+    brain = MockBrain()
+    heart = MockHeart()
+    r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
+    r._call_sdk = AsyncMock(return_value=("OK", []))
 
     try:
-        # Get MAX_CONVERSATIONS from the class (default 100)
-        max_convs = getattr(r, "MAX_CONVERSATIONS", 100)
-
-        # Create max+1 conversations
+        # Create MAX_CONVERSATIONS + 1 conversations
         session_ids = []
-        for i in range(max_convs + 1):
+        for i in range(MAX_CONVERSATIONS + 1):
             sid = f"evict-{i:04d}"
             session_ids.append(sid)
             await r.run_turn(sid, f"Message {i}")
 
         # Should not exceed MAX_CONVERSATIONS
-        assert len(r._conversations) <= max_convs
+        assert len(r._conversations) <= MAX_CONVERSATIONS
 
         # The first session should have been evicted
         assert session_ids[0] not in r._conversations

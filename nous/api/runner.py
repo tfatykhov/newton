@@ -1,25 +1,34 @@
 """Agent runner — executes a single conversational turn.
 
 Wires CognitiveLayer.pre_turn() and post_turn() around
-the actual LLM call. This is the core execution loop.
+the Claude Agent SDK query. This is the core execution loop.
+
+Uses claude-agent-sdk with in-process MCP tools so Claude can
+call record_decision, learn_fact, recall_deep, and create_censor
+during a turn.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Any
 
-import httpx
-
+from nous.brain.brain import Brain
 from nous.cognitive.layer import CognitiveLayer
-from nous.cognitive.schemas import TurnContext, TurnResult
+from nous.cognitive.schemas import ToolResult, TurnContext, TurnResult
 from nous.config import Settings
+from nous.heart.heart import Heart
 
 logger = logging.getLogger(__name__)
 
 MAX_CONVERSATIONS = 100
 MAX_HISTORY_MESSAGES = 20
+
+# Frame types that should nudge Claude to call record_decision
+_DECISION_FRAMES = frozenset({"decision", "task", "debug"})
 
 
 @dataclass
@@ -42,8 +51,8 @@ class Conversation:
 class AgentRunner:
     """Runs conversational turns with cognitive layer hooks.
 
-    For v0.1.0, uses the Anthropic Messages API directly via httpx.
-    Claude Agent SDK integration is a future enhancement.
+    Uses the Claude Agent SDK with in-process MCP tools for
+    tool-augmented LLM conversations.
     """
 
     REFLECTION_PROMPT = (
@@ -57,30 +66,42 @@ class AgentRunner:
     def __init__(
         self,
         cognitive: CognitiveLayer,
+        brain: Brain,
+        heart: Heart,
         settings: Settings,
     ) -> None:
         self._cognitive = cognitive
+        self._brain = brain
+        self._heart = heart
         self._settings = settings
         self._conversations: OrderedDict[str, Conversation] = OrderedDict()
-        self._client: httpx.AsyncClient | None = None
+        self._mcp_server: Any | None = None  # McpSdkServerConfig from tools.py
 
     async def start(self) -> None:
-        """Initialize the HTTP client for Anthropic API."""
-        self._client = httpx.AsyncClient(
-            base_url="https://api.anthropic.com",
-            headers={
-                "x-api-key": self._settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            timeout=120.0,
+        """Initialize the SDK: set auth env vars and create in-process MCP server."""
+        # Set Anthropic auth environment variables for the SDK.
+        # auth_token takes precedence over api_key.
+        if self._settings.anthropic_auth_token:
+            os.environ["ANTHROPIC_AUTH_TOKEN"] = self._settings.anthropic_auth_token
+        elif self._settings.anthropic_api_key:
+            os.environ["ANTHROPIC_API_KEY"] = self._settings.anthropic_api_key
+        else:
+            logger.warning(
+                "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set — "
+                "SDK queries will fail"
+            )
+
+        # Create in-process MCP server with Nous tools
+        from nous.api.tools import create_nous_mcp_server
+
+        self._mcp_server = create_nous_mcp_server(self._brain, self._heart)
+        logger.info(
+            "SDK tools registered: record_decision, learn_fact, recall_deep, create_censor"
         )
 
     async def close(self) -> None:
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        """Clean up SDK resources."""
+        self._mcp_server = None
 
     async def run_turn(
         self,
@@ -94,13 +115,15 @@ class AgentRunner:
         1. Get or create Conversation for session_id
         2. Call cognitive.pre_turn() -> TurnContext
         3. Append user message to conversation history
-        4. Call Anthropic Messages API
-        5. Extract assistant response text
-        6. Append assistant message to conversation history
-        7. Call cognitive.post_turn() with TurnResult
-        8. Return (response_text, turn_context)
+        4. Build full system prompt (cognitive context + frame instructions + history)
+        5. Call Claude via SDK query() with in-process tools
+        6. Extract response text and tool call info from stream
+        7. Append assistant message to conversation history
+        8. Call cognitive.post_turn() with TurnResult
+        9. Safety net: check if decision frame but no record_decision called
+        10. Return (response_text, turn_context)
 
-        On API error: log, create TurnResult with error, still call post_turn.
+        On SDK error: log, create TurnResult with error, still call post_turn.
         """
         _agent_id = agent_id or self._settings.agent_id
         conversation = self._get_or_create_conversation(session_id)
@@ -111,24 +134,32 @@ class AgentRunner:
         # 3. Append user message
         conversation.messages.append(Message(role="user", content=user_message))
 
-        # 4-6. Call LLM
+        # 4-6. Call LLM via SDK
         response_text = ""
+        tool_results: list[ToolResult] = []
         error = None
         try:
-            response_text = await self._call_llm(
-                system_prompt=turn_context.system_prompt,
-                messages=self._format_messages(conversation),
+            response_text, tool_results = await self._call_sdk(
+                system_prompt=self._build_system_prompt(turn_context, conversation),
+                user_message=user_message,
             )
             conversation.messages.append(Message(role="assistant", content=response_text))
         except Exception as e:
-            logger.error("Anthropic API error: %s", e)
+            logger.error("SDK query error: %s", e)
             error = str(e)
             response_text = "I encountered an error processing your request. Please try again."
             conversation.messages.append(Message(role="assistant", content=response_text))
 
         # 7. Post-turn (always called, even on error)
-        turn_result = TurnResult(response_text=response_text, error=error)
+        turn_result = TurnResult(
+            response_text=response_text,
+            tool_results=tool_results,
+            error=error,
+        )
         await self._cognitive.post_turn(_agent_id, session_id, turn_result, turn_context)
+
+        # 8. Safety net: warn if decision frame but record_decision not called
+        self._check_safety_net(turn_context, tool_results)
 
         # Store context
         conversation.turn_contexts.append(turn_context)
@@ -146,12 +177,17 @@ class AgentRunner:
         conversation = self._conversations.get(session_id)
 
         reflection: str | None = None
-        if conversation and len(conversation.messages) >= 6:  # 3 user + 3 assistant = 6 messages
+        if conversation and len(conversation.messages) >= 6:  # 3 user + 3 assistant = 6
             try:
-                reflection = await self._call_llm(
+                # Build a reflection prompt with conversation history
+                history_text = self._format_history_text(conversation)
+                reflection_prompt = (
+                    f"Here is a conversation to review:\n\n{history_text}\n\n"
+                    f"{self.REFLECTION_PROMPT}"
+                )
+                reflection, _ = await self._call_sdk(
                     system_prompt="You are reviewing a conversation to extract lessons learned.",
-                    messages=self._format_messages(conversation)
-                    + [{"role": "user", "content": self.REFLECTION_PROMPT}],
+                    user_message=reflection_prompt,
                 )
             except Exception as e:
                 logger.warning("Failed to generate reflection: %s", e)
@@ -161,23 +197,151 @@ class AgentRunner:
         # Remove conversation
         self._conversations.pop(session_id, None)
 
-    async def _call_llm(self, system_prompt: str, messages: list[dict]) -> str:
-        """Call Anthropic Messages API."""
-        if not self._client:
-            raise RuntimeError("AgentRunner not started — call start() first")
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-        response = await self._client.post(
-            "/v1/messages",
-            json={
-                "model": self._settings.model,
-                "max_tokens": self._settings.max_tokens,
-                "system": system_prompt,
-                "messages": messages,
-            },
+    async def _call_sdk(
+        self,
+        system_prompt: str,
+        user_message: str,
+    ) -> tuple[str, list[ToolResult]]:
+        """Call Claude via the SDK query() function.
+
+        Returns (response_text, tool_results).
+        The SDK handles the tool loop internally — we iterate the stream
+        and collect the final text response and any tool call info.
+        """
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ResultMessage,
+            TextBlock,
+            ToolUseBlock,
+            query,
         )
-        response.raise_for_status()
-        data = response.json()
-        return data["content"][0]["text"]
+
+        options = ClaudeAgentOptions(
+            system_prompt=system_prompt,
+            model=self._settings.model,
+            max_turns=self._settings.sdk_max_turns,
+            permission_mode="bypassPermissions",
+        )
+
+        # Register in-process MCP server if available
+        if self._mcp_server:
+            options.mcp_servers = {"nous": self._mcp_server}
+
+        response_text_parts: list[str] = []
+        tool_results: list[ToolResult] = []
+
+        async for message in query(prompt=user_message, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        response_text_parts.append(block.text)
+                    elif isinstance(block, ToolUseBlock):
+                        # Record tool call for TurnResult tracking
+                        tool_results.append(
+                            ToolResult(
+                                tool_name=block.name,
+                                arguments=block.input,
+                            )
+                        )
+            elif isinstance(message, ResultMessage):
+                if message.is_error:
+                    raise RuntimeError(
+                        f"SDK query failed (session={message.session_id}): "
+                        f"{message.result or 'unknown error'}"
+                    )
+                # If ResultMessage has a result text and we got no text blocks,
+                # use it as the response
+                if message.result and not response_text_parts:
+                    response_text_parts.append(message.result)
+
+        response_text = "\n".join(response_text_parts) if response_text_parts else ""
+        return response_text, tool_results
+
+    def _build_system_prompt(
+        self,
+        turn_context: TurnContext,
+        conversation: Conversation,
+    ) -> str:
+        """Build the full system prompt: cognitive context + frame instructions + history."""
+        parts = [turn_context.system_prompt]
+
+        # Add frame-specific tool instructions
+        frame_instructions = self._get_frame_instructions(turn_context)
+        if frame_instructions:
+            parts.append(frame_instructions)
+
+        # Add conversation history as context
+        if conversation.messages:
+            history = self._format_history_text(conversation)
+            if history:
+                parts.append(
+                    f"## Conversation History\n\n{history}\n\n"
+                    "Continue the conversation from here."
+                )
+
+        return "\n\n".join(parts)
+
+    def _get_frame_instructions(self, turn_context: TurnContext) -> str:
+        """Return frame-specific tool use instructions.
+
+        Nudges Claude to use appropriate tools based on the active cognitive frame.
+        """
+        frame_id = turn_context.frame.frame_id
+
+        if frame_id == "decision":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a DECISION frame. You MUST call `record_decision` "
+                "to record your decision before responding. Include your reasoning, "
+                "confidence level, and category."
+            )
+        elif frame_id == "task":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a TASK frame. If you make any decisions during this task, "
+                "call `record_decision` to record them. Use `recall_deep` to search "
+                "for relevant past decisions and knowledge. Use `learn_fact` to store "
+                "any new facts discovered."
+            )
+        elif frame_id == "debug":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a DEBUG frame. Use `recall_deep` to search for relevant "
+                "past decisions and procedures. Record your debugging decisions with "
+                "`record_decision`. Store any root cause findings with `learn_fact`."
+            )
+        elif frame_id == "question":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a QUESTION frame. Use `recall_deep` to search memory "
+                "for relevant knowledge before answering."
+            )
+
+        return ""
+
+    def _check_safety_net(
+        self,
+        turn_context: TurnContext,
+        tool_results: list[ToolResult],
+    ) -> None:
+        """Log a warning if a decision frame was active but record_decision wasn't called."""
+        frame_id = turn_context.frame.frame_id
+        if frame_id not in _DECISION_FRAMES:
+            return
+
+        tool_names = {tr.tool_name for tr in tool_results}
+        if "record_decision" not in tool_names:
+            logger.warning(
+                "Safety net: frame=%s but record_decision was not called during turn "
+                "(session decision_id=%s). Consider recording this decision.",
+                frame_id,
+                turn_context.decision_id,
+            )
 
     def _get_or_create_conversation(self, session_id: str) -> Conversation:
         """Get existing or create new conversation with LRU eviction."""
@@ -195,10 +359,19 @@ class AgentRunner:
         return conversation
 
     def _format_messages(self, conversation: Conversation) -> list[dict]:
-        """Format conversation history for Anthropic API.
+        """Format conversation history for API calls.
 
         Returns list of {"role": ..., "content": ...}.
         Limits to last MAX_HISTORY_MESSAGES messages.
         """
         recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
         return [{"role": m.role, "content": m.content} for m in recent]
+
+    def _format_history_text(self, conversation: Conversation) -> str:
+        """Format conversation history as readable text for system prompt injection."""
+        recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
+        lines = []
+        for msg in recent:
+            role_label = "User" if msg.role == "user" else "Assistant"
+            lines.append(f"{role_label}: {msg.content}")
+        return "\n\n".join(lines)
