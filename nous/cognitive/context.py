@@ -83,7 +83,7 @@ class ContextEngine:
             try:
                 censors = await self._heart.list_censors(session=session)
                 if censors:
-                    _active_censor_names = [getattr(c, "trigger_pattern", "") for c in censors]
+                    _active_censor_names = [str(getattr(c, "id", "")) for c in censors]
                     censor_text = self._format_censors(censors)
                     censor_text = self._truncate_to_budget(censor_text, budget.censors)
                     sections.append(

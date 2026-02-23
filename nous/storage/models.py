@@ -310,7 +310,7 @@ class Episode(Base):
     # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     encoded_censors = mapped_column(JSONB, nullable=True)
-    compression_tier: Mapped[str | None] = mapped_column(String(20), server_default="'raw'")
+    compression_tier: Mapped[str | None] = mapped_column(String(20), server_default="raw")
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
     # Relationships
