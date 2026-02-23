@@ -482,13 +482,20 @@ class Brain:
         description: str,
         stakes: str,
         confidence: float,
+        category: str | None = None,
         tags: list[str] | None = None,
         reasons: list[dict] | None = None,
         pattern: str | None = None,
         quality_score: float | None = None,
+        context: dict | None = None,
         session: AsyncSession | None = None,
     ) -> GuardrailResult:
-        """Evaluate guardrails before action."""
+        """Evaluate guardrails before action.
+
+        Args:
+            context: Arbitrary key-value dict accessible as decision.context in CEL.
+                     Used to pass custom fields for guardrail evaluation.
+        """
         if session is None:
             async with self.db.session() as session:
                 result = await self.guardrails.check(
@@ -497,10 +504,12 @@ class Brain:
                     description=description,
                     stakes=stakes,
                     confidence=confidence,
+                    category=category,
                     tags=tags,
                     reasons=reasons,
                     pattern=pattern,
                     quality_score=quality_score,
+                    context=context,
                 )
                 await session.commit()
                 return result
@@ -510,10 +519,12 @@ class Brain:
             description=description,
             stakes=stakes,
             confidence=confidence,
+            category=category,
             tags=tags,
             reasons=reasons,
             pattern=pattern,
             quality_score=quality_score,
+            context=context,
         )
 
     # ------------------------------------------------------------------

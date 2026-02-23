@@ -171,6 +171,7 @@ CREATE TABLE brain.guardrails (
     description TEXT,
     condition JSONB NOT NULL,
     severity VARCHAR(20) NOT NULL DEFAULT 'warn' CHECK (severity IN ('warn', 'block', 'absolute')),
+    priority INTEGER DEFAULT 100,
     activation_count INT DEFAULT 0,
     last_activated TIMESTAMPTZ,
     active BOOLEAN DEFAULT TRUE,

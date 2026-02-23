@@ -252,6 +252,7 @@ class Guardrail(Base):
     description: Mapped[str | None] = mapped_column(Text)
     condition: Mapped[dict] = mapped_column(JSONB, nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False, server_default="warn")
+    priority: Mapped[int | None] = mapped_column(Integer, server_default="100")
     activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
