@@ -12,7 +12,10 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.brain import Brain
-from nous.cognitive.schemas import ContextBudget, ContextSection, FrameSelection
+from nous.cognitive.dedup import ConversationDeduplicator
+from nous.cognitive.intent import RetrievalPlan
+from nous.cognitive.schemas import BuildResult, ContextBudget, ContextSection, FrameSelection
+from nous.cognitive.usage_tracker import UsageTracker
 from nous.config import Settings
 from nous.heart.heart import Heart
 from nous.heart.search import apply_frame_boost
@@ -31,11 +34,13 @@ class ContextEngine:
         heart: Heart,
         settings: Settings,
         identity_prompt: str = "",
+        deduplicator: ConversationDeduplicator | None = None,
     ) -> None:
         self._brain = brain
         self._heart = heart
         self._settings = settings
         self._identity_prompt = identity_prompt
+        self._deduplicator = deduplicator
 
     async def build(
         self,
@@ -44,10 +49,20 @@ class ContextEngine:
         input_text: str,
         frame: FrameSelection,
         session: AsyncSession | None = None,
-    ) -> tuple[str, list[ContextSection]]:
+        *,
+        conversation_messages: list[str] | None = None,
+        retrieval_plan: RetrievalPlan | None = None,
+        usage_tracker: UsageTracker | None = None,
+    ) -> BuildResult:
         """Build system prompt + context sections within budget.
 
-        Returns (system_prompt_string, sections_list).
+        Returns BuildResult with system_prompt, sections, recalled_ids,
+        and recalled_content_map.
+
+        New optional parameters (all backward-compatible):
+        - conversation_messages: Recent messages for deduplication (D4).
+        - retrieval_plan: Intent-driven retrieval plan (D2). Falls back to default.
+        - usage_tracker: Feedback tracker for boost/penalty (D3).
 
         Assembly order (by priority):
         1. Identity prompt (always included, static)
@@ -59,12 +74,40 @@ class ContextEngine:
         7. Relevant procedures from Heart.search_procedures()
         8. Related episodes from Heart.search_episodes()
 
-        Each section is truncated to its budget allocation.
-        Sections are skipped entirely if budget is 0 for that layer.
+        Pipeline order per memory type (F10):
+        retrieve -> apply_frame_boost -> dedup -> usage_boost -> truncate
         """
         budget = ContextBudget.for_frame(frame.frame_id)
         sections: list[ContextSection] = []
-        _active_censor_names: list[str] = []  # Populated in step 2, used for frame boost
+        _active_censor_names: list[str] = []
+        recalled_ids: dict[str, list[str]] = {
+            "decision": [],
+            "fact": [],
+            "procedure": [],
+            "episode": [],
+        }
+        recalled_content_map: dict[str, str] = {}
+
+        # Apply budget overrides from retrieval plan (F6: REPLACE semantics)
+        skip_types: set[str] = set()
+        if retrieval_plan:
+            if retrieval_plan.budget_overrides:
+                budget.apply_overrides(retrieval_plan.budget_overrides)
+            skip_types = retrieval_plan.skip_types
+
+        # Determine query text and limits from plan
+        _query_text = input_text
+        _limits: dict[str, int] = {}
+        if retrieval_plan and retrieval_plan.queries:
+            for q in retrieval_plan.queries:
+                _limits[q.memory_type] = q.limit
+                if q.query_text:
+                    _query_text = q.query_text  # Use plan's query text
+
+        # Trim conversation_messages to budget.conversation_window (F13)
+        _conv_msgs = conversation_messages
+        if _conv_msgs:
+            _conv_msgs = _conv_msgs[-budget.conversation_window :]
 
         # 1. Identity (always included)
         if self._identity_prompt:
@@ -128,12 +171,24 @@ class ContextEngine:
             except Exception:
                 logger.warning("Failed to load working memory during context build")
 
-        # 5. Decisions (P1-10: drop reasons from format)
-        if budget.decisions > 0:
+        # 5. Decisions (F26: skip_types is primary skip mechanism)
+        if budget.decisions > 0 and "decision" not in skip_types:
             try:
-                decisions = await self._brain.query(input_text, limit=5, session=session)
+                limit = _limits.get("decision", 5)
+                decisions = await self._brain.query(_query_text, limit=limit, session=session)
                 if decisions:
+                    # F1: Collect recalled IDs
+                    for d in decisions:
+                        mid = str(getattr(d, "id", ""))
+                        if mid:
+                            recalled_ids["decision"].append(mid)
+                    # Format content for each decision (F8: recalled_content_map)
                     dec_text = self._format_decisions(decisions)
+                    for d in decisions:
+                        mid = str(getattr(d, "id", ""))
+                        if mid:
+                            desc = getattr(d, "description", "")
+                            recalled_content_map[mid] = desc
                     dec_text = self._truncate_to_budget(dec_text, budget.decisions)
                     sections.append(
                         ContextSection(
@@ -146,12 +201,30 @@ class ContextEngine:
             except Exception:
                 logger.warning("Brain.query failed during context build")
 
-        # 6. Facts (P1-6: use type-specific search)
-        if budget.facts > 0:
+        # 6. Facts (F10: retrieve -> apply_frame_boost -> dedup -> usage_boost -> truncate)
+        if budget.facts > 0 and "fact" not in skip_types:
             try:
-                facts = await self._heart.search_facts(input_text, limit=5, session=session)
+                limit = _limits.get("fact", 5)
+                facts = await self._heart.search_facts(_query_text, limit=limit, session=session)
                 if facts:
+                    # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
+
+                    # Dedup against conversation
+                    facts = await self._apply_dedup(facts, _conv_msgs, "content")
+
+                    # Usage boost
+                    facts = self._apply_usage_boost(facts, usage_tracker)
+
+                    # F1: Collect recalled IDs AFTER filtering (P1-1 fix:
+                    # collecting before dedup would penalize deduped memories
+                    # in the usage tracker as "retrieved but not referenced")
+                    for f in facts:
+                        mid = str(getattr(f, "id", ""))
+                        if mid:
+                            recalled_ids["fact"].append(mid)
+                            recalled_content_map[mid] = getattr(f, "content", "")
+
                     facts_text = self._format_facts(facts)
                     facts_text = self._truncate_to_budget(facts_text, budget.facts)
                     sections.append(
@@ -166,11 +239,25 @@ class ContextEngine:
                 logger.warning("Heart.search_facts failed during context build")
 
         # 7. Procedures
-        if budget.procedures > 0:
+        if budget.procedures > 0 and "procedure" not in skip_types:
             try:
-                procedures = await self._heart.search_procedures(input_text, limit=5, session=session)
+                limit = _limits.get("procedure", 5)
+                procedures = await self._heart.search_procedures(_query_text, limit=limit, session=session)
                 if procedures:
+                    # F10: apply_frame_boost
                     procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
+
+                    # Dedup + usage boost
+                    procedures = await self._apply_dedup(procedures, _conv_msgs, "name")
+                    procedures = self._apply_usage_boost(procedures, usage_tracker)
+
+                    # F1: Collect recalled IDs AFTER filtering (P1-1 fix)
+                    for p in procedures:
+                        mid = str(getattr(p, "id", ""))
+                        if mid:
+                            recalled_ids["procedure"].append(mid)
+                            recalled_content_map[mid] = getattr(p, "name", "")
+
                     proc_text = self._format_procedures(procedures)
                     proc_text = self._truncate_to_budget(proc_text, budget.procedures)
                     sections.append(
@@ -185,11 +272,25 @@ class ContextEngine:
                 logger.warning("Heart.search_procedures failed during context build")
 
         # 8. Episodes
-        if budget.episodes > 0:
+        if budget.episodes > 0 and "episode" not in skip_types:
             try:
-                episodes = await self._heart.search_episodes(input_text, limit=5, session=session)
+                limit = _limits.get("episode", 5)
+                episodes = await self._heart.search_episodes(_query_text, limit=limit, session=session)
                 if episodes:
+                    # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
+
+                    # Dedup + usage boost
+                    episodes = await self._apply_dedup(episodes, _conv_msgs, "summary")
+                    episodes = self._apply_usage_boost(episodes, usage_tracker)
+
+                    # F1: Collect recalled IDs AFTER filtering (P1-1 fix)
+                    for e in episodes:
+                        mid = str(getattr(e, "id", ""))
+                        if mid:
+                            recalled_ids["episode"].append(mid)
+                            recalled_content_map[mid] = getattr(e, "summary", "")
+
                     ep_text = self._format_episodes(episodes)
                     ep_text = self._truncate_to_budget(ep_text, budget.episodes)
                     sections.append(
@@ -209,7 +310,58 @@ class ContextEngine:
             parts.append(f"## {section.label}\n\n{section.content}")
 
         system_prompt = "\n\n".join(parts)
-        return system_prompt, sections
+        return BuildResult(
+            system_prompt=system_prompt,
+            sections=sections,
+            recalled_ids=recalled_ids,
+            recalled_content_map=recalled_content_map,
+        )
+
+    async def _apply_dedup(
+        self,
+        items: list,
+        conversation_messages: list[str] | None,
+        content_attr: str,
+    ) -> list:
+        """Apply conversation deduplication to retrieved items.
+
+        Filters out items whose content is redundant with recent conversation.
+        """
+        if not self._deduplicator or not conversation_messages or not items:
+            return items
+
+        try:
+            memories = [
+                (str(getattr(item, "id", "")), getattr(item, content_attr, ""))
+                for item in items
+            ]
+            results = await self._deduplicator.check(memories, conversation_messages)
+            # Filter out redundant items
+            redundant_ids = {r.memory_id for r in results if r.is_redundant}
+            return [
+                item for item in items if str(getattr(item, "id", "")) not in redundant_ids
+            ]
+        except Exception:
+            logger.warning("Dedup failed, keeping all items")
+            return items
+
+    def _apply_usage_boost(self, items: list, usage_tracker: UsageTracker | None) -> list:
+        """Re-rank items using usage-based boost factors.
+
+        Items with high reference rates get boosted; items retrieved
+        but rarely referenced get penalized.
+        """
+        if not usage_tracker or not items:
+            return items
+
+        boosted = []
+        for item in items:
+            mid = str(getattr(item, "id", ""))
+            boost = usage_tracker.get_boost_factor(mid) if mid else 1.0
+            boosted.append((item, boost))
+
+        boosted.sort(key=lambda x: x[1], reverse=True)
+        return [item for item, _ in boosted]
 
     def _estimate_tokens(self, text: str) -> int:
         """Rough token count: len(text) / CHARS_PER_TOKEN."""

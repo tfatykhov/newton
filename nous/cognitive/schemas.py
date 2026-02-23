@@ -45,19 +45,30 @@ class ContextBudget(BaseModel):
     facts: int = 1500
     procedures: int = 1500
     episodes: int = 1000
+    conversation_window: int = 5  # D7: Number of turns for dedup window
 
     @classmethod
     def for_frame(cls, frame_id: str) -> ContextBudget:
-        """Return frame-adaptive budget."""
+        """Return frame-adaptive budget with per-frame conversation windows (D7)."""
         budgets = {
-            "conversation": cls(total=3000, decisions=500, facts=500, procedures=0, episodes=0),
-            "question": cls(total=6000, decisions=1000, facts=1500, procedures=500, episodes=500),
-            "task": cls(total=8000),
-            "decision": cls(total=12000, decisions=3000, facts=2000, procedures=2000, episodes=1000),
-            "creative": cls(total=6000, censors=100, decisions=1000, facts=1500, procedures=500, episodes=500),
-            "debug": cls(total=10000, decisions=1500, facts=1000, procedures=2500, episodes=1000),
+            "conversation": cls(total=3000, decisions=500, facts=500, procedures=0, episodes=0, conversation_window=3),
+            "question": cls(total=6000, decisions=1000, facts=1500, procedures=500, episodes=500, conversation_window=5),
+            "task": cls(total=8000, conversation_window=5),
+            "decision": cls(total=12000, decisions=3000, facts=2000, procedures=2000, episodes=1000, conversation_window=8),
+            "creative": cls(total=6000, censors=100, decisions=1000, facts=1500, procedures=500, episodes=500, conversation_window=4),
+            "debug": cls(total=10000, decisions=1500, facts=1000, procedures=2500, episodes=1000, conversation_window=6),
         }
         return budgets.get(frame_id, cls())
+
+    def apply_overrides(self, overrides: dict[str, int]) -> None:
+        """Apply budget overrides with REPLACE semantics (F6).
+
+        Each key in overrides maps to a field name on this model.
+        Values replace (not add to) the current allocation.
+        """
+        for key, value in overrides.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
 
 
 class ContextSection(BaseModel):
@@ -67,6 +78,15 @@ class ContextSection(BaseModel):
     label: str
     content: str
     token_estimate: int  # rough char/4 estimate
+
+
+class BuildResult(BaseModel):
+    """Output of ContextEngine.build() — system prompt + recalled IDs (F1)."""
+
+    system_prompt: str
+    sections: list[ContextSection] = Field(default_factory=list)
+    recalled_ids: dict[str, list[str]] = Field(default_factory=dict)
+    recalled_content_map: dict[str, str] = Field(default_factory=dict)
 
 
 class TurnContext(BaseModel):
@@ -79,6 +99,9 @@ class TurnContext(BaseModel):
     context_token_estimate: int = 0
     recalled_decision_ids: list[str] = Field(default_factory=list)
     recalled_fact_ids: list[str] = Field(default_factory=list)
+    recalled_procedure_ids: list[str] = Field(default_factory=list)
+    recalled_episode_ids: list[str] = Field(default_factory=list)
+    recalled_content_map: dict[str, str] = Field(default_factory=dict)
 
 
 class ToolResult(BaseModel):
