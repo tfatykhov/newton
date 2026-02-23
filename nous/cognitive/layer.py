@@ -209,7 +209,7 @@ class CognitiveLayer:
             logger.warning("Learning failed during post_turn")
 
         # 3. DELIBERATION — finalize if decision exists
-        if decision_id and turn_result.error is None:
+        if decision_id:
             try:
                 has_tool_errors = any(tr.error for tr in turn_result.tool_results)
                 if turn_result.error is not None:
@@ -285,6 +285,7 @@ class CognitiveLayer:
                 logger.warning("Failed to end episode %s", episode_id)
 
         # 2. Extract facts from reflection
+        facts_extracted = 0
         if reflection:
             # P2-9: Parse "learned: X" lines
             matches = _LEARNED_PATTERN.findall(reflection)
@@ -300,6 +301,7 @@ class CognitiveLayer:
                         category="rule",
                     )
                     await self._heart.learn(fact_input, session=session)
+                    facts_extracted += 1
                 except Exception:
                     logger.warning("Failed to extract fact from reflection: %s", learned_text[:50])
 
@@ -313,7 +315,7 @@ class CognitiveLayer:
                 {
                     "session_id": session_id,
                     "had_reflection": reflection is not None,
-                    "facts_extracted": len(_LEARNED_PATTERN.findall(reflection)) if reflection else 0,
+                    "facts_extracted": facts_extracted,
                 },
                 session=session,
             )
