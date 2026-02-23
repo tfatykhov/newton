@@ -6,6 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client curl && rm -rf /var/lib/apt/lists/*
 
+# Create SDK workspace directory
+RUN mkdir -p /tmp/nous-workspace
+
 # Copy source BEFORE pip install (F5: non-editable install)
 COPY pyproject.toml .
 COPY nous/ nous/

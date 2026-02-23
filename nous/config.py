@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     anthropic_api_key: str = Field("", validation_alias="ANTHROPIC_API_KEY")
+    # Dual auth: auth_token takes precedence over api_key (SDK uses auth_token)
+    anthropic_auth_token: str = Field("", validation_alias="ANTHROPIC_AUTH_TOKEN")
 
     # Agent identity
     agent_name: str = "Nous"
@@ -48,6 +50,19 @@ class Settings(BaseSettings):
     # LLM
     model: str = "claude-sonnet-4-5-20250514"
     max_tokens: int = 4096
+
+    # SDK settings (claude-agent-sdk)
+    sdk_max_turns: int = 10  # Max tool use iterations per query
+    sdk_permission_mode: str = "default"  # default, acceptEdits, plan, bypassPermissions
+    sdk_workspace: str = "/tmp/nous-workspace"
+    sdk_allowed_tools: list[str] = Field(
+        default_factory=lambda: [
+            "record_decision",
+            "learn_fact",
+            "recall_deep",
+            "create_censor",
+        ]
+    )
 
     @property
     def db_url(self) -> str:
