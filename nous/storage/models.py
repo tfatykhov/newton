@@ -64,7 +64,7 @@ class Frame(Base):
     suppressed_frames = mapped_column(ARRAY(Text), nullable=True)
     frame_censors = mapped_column(ARRAY(Text), nullable=True)
     usage_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
-    last_used: Mapped[datetime | None] = mapped_column()
+    last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 

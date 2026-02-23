@@ -24,13 +24,13 @@ INSERT INTO nous_system.agents (id, name, description, config) VALUES (
 -- ---------------------------------------------------------------------------
 -- Default cognitive frames
 -- ---------------------------------------------------------------------------
-INSERT INTO nous_system.frames (id, agent_id, name, description, activation_patterns, default_category) VALUES
-    ('task', 'nous-default', 'Task Execution', 'Focused on completing a specific task', ARRAY['build', 'fix', 'create', 'implement', 'deploy'], 'tooling'),
-    ('question', 'nous-default', 'Question Answering', 'Answering questions, looking things up', ARRAY['what', 'how', 'why', 'explain', 'tell me'], 'process'),
-    ('decision', 'nous-default', 'Decision Making', 'Evaluating options, choosing a path', ARRAY['should', 'choose', 'decide', 'compare', 'trade-off'], 'architecture'),
-    ('creative', 'nous-default', 'Creative', 'Brainstorming, ideation, exploration', ARRAY['imagine', 'brainstorm', 'what if', 'design', 'explore'], 'architecture'),
-    ('conversation', 'nous-default', 'Conversation', 'Casual or social interaction', ARRAY['hello', 'hi', 'thanks', 'how are you'], 'process'),
-    ('debug', 'nous-default', 'Debug', 'Investigating problems, tracing errors', ARRAY['error', 'bug', 'broken', 'failing', 'crash', 'wrong'], 'tooling');
+INSERT INTO nous_system.frames (id, agent_id, name, description, activation_patterns, default_category, default_stakes) VALUES
+    ('task', 'nous-default', 'Task Execution', 'Focused on completing a specific task', ARRAY['build', 'fix', 'create', 'implement', 'deploy'], 'tooling', 'medium'),
+    ('question', 'nous-default', 'Question Answering', 'Answering questions, looking things up', ARRAY['what', 'how', 'why', 'explain', 'tell me'], 'process', 'low'),
+    ('decision', 'nous-default', 'Decision Making', 'Evaluating options, choosing a path', ARRAY['should', 'choose', 'decide', 'compare', 'trade-off'], 'architecture', 'high'),
+    ('creative', 'nous-default', 'Creative', 'Brainstorming, ideation, exploration', ARRAY['imagine', 'brainstorm', 'what if', 'design', 'explore'], 'architecture', 'low'),
+    ('conversation', 'nous-default', 'Conversation', 'Casual or social interaction', ARRAY['hello', 'hi', 'thanks', 'how are you'], 'process', 'low'),
+    ('debug', 'nous-default', 'Debug', 'Investigating problems, tracing errors', ARRAY['error', 'bug', 'broken', 'failing', 'crash', 'wrong'], 'tooling', 'medium');
 
 -- ---------------------------------------------------------------------------
 -- Default guardrails (CEL expressions)
