@@ -128,39 +128,45 @@ GUARDRAIL_TEST_AGENT = "test-guardrail-agent"
 
 @pytest_asyncio.fixture
 async def seed_guardrails(session):
-    """Insert the 4 default guardrails into the test session (P1-5 fix).
+    """Insert the 4 default guardrails into the test session.
 
     Uses a test-specific agent_id to avoid unique constraint collisions
     with seed.sql data that is already loaded in the real database.
+
+    Uses legacy JSONB format to test backward compatibility.
     """
     guardrails = [
         Guardrail(
             agent_id=GUARDRAIL_TEST_AGENT,
             name="no-high-stakes-low-confidence",
             description="Block high-stakes decisions with low confidence",
-            condition={"stakes": "high", "confidence_lt": 0.5},
+            condition={"stakes": "high", "confidence_lt": 0.5},  # Legacy JSONB
             severity="block",
+            priority=100,
         ),
         Guardrail(
             agent_id=GUARDRAIL_TEST_AGENT,
             name="no-critical-without-review",
             description="Block critical-stakes without explicit review",
-            condition={"stakes": "critical"},
+            condition={"stakes": "critical"},  # Legacy JSONB
             severity="block",
+            priority=90,
         ),
         Guardrail(
             agent_id=GUARDRAIL_TEST_AGENT,
             name="require-reasons",
             description="Block decisions without at least one reason",
-            condition={"reason_count_lt": 1},
+            condition={"reason_count_lt": 1},  # Legacy JSONB
             severity="block",
+            priority=110,
         ),
         Guardrail(
             agent_id=GUARDRAIL_TEST_AGENT,
             name="low-quality-recording",
             description="Block low-quality decisions (missing tags/pattern)",
-            condition={"quality_lt": 0.5},
+            condition={"quality_lt": 0.5},  # Legacy JSONB
             severity="block",
+            priority=120,
         ),
     ]
     for g in guardrails:
