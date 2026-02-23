@@ -873,6 +873,21 @@ The REST API and MCP server have no auth. This is a local/dev deployment. Auth i
 ### D8: Runtime dependencies are optional
 `uvicorn`, `starlette`, `mcp` are in `[project.optional-dependencies] runtime`, not core deps. You can use Brain/Heart/Cognitive as a library without installing the server.
 
+### D9: End-of-session reflection via LLM (from research/013)
+When `end_conversation()` is called and the conversation has ≥ 3 turns, the Runner makes ONE additional LLM call to generate a reflection. The prompt asks for structured output with "learned: X" lines. This reflection is passed to `CognitiveLayer.end_session(reflection=...)` for fact extraction. Short conversations (< 3 turns) skip this to avoid waste. This is the ONLY place where Runtime generates non-conversational LLM output.
+
+**Reflection prompt template:**
+```
+Review this conversation. Summarize briefly:
+1. What was the main task?
+2. What went well?
+3. What should be done differently?
+4. List any new facts learned as "learned: <fact>" lines (one per line).
+```
+
+### D10: No HITL approval gates for v0.1.0 (from research/013)
+LangChain requires human approval for all memory edits (attack vector mitigation). We skip this for v0.1.0 — all Heart writes are immediate. For v0.2.0: censors with severity="block" and new procedures should queue for approval. The REST API will need a `/pending-approvals` endpoint and the Heart modules will need a `requires_approval` flag.
+
 ## Error Handling
 
 - All REST handlers wrapped in try/except → return JSONResponse with error details
