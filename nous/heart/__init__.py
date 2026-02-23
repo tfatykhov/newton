@@ -13,6 +13,7 @@ from nous.heart.schemas import (
     EpisodeInput,
     EpisodeOutcome,
     EpisodeSummary,
+    ContradictionWarning,
     FactDetail,
     FactInput,
     FactSummary,
@@ -39,6 +40,7 @@ __all__ = [
     "EpisodeInput",
     "EpisodeSummary",
     # Facts
+    "ContradictionWarning",
     "FactDetail",
     "FactInput",
     "FactSummary",

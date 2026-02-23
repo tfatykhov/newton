@@ -14,7 +14,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.embeddings import EmbeddingProvider
-from nous.heart.schemas import FactDetail, FactInput, FactSummary
+from nous.heart.schemas import ContradictionWarning, FactDetail, FactInput, FactSummary
 from nous.heart.search import hybrid_search
 from nous.storage.database import Database
 from nous.storage.models import Event, Fact
@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 class FactManager:
     """Manages semantic memory — what we know."""
+
+    # Threshold for domain fact count before emitting compaction event
+    DOMAIN_COMPACTION_THRESHOLD = 10
+
+    # Similarity range for contradiction detection (between dedup and unrelated)
+    CONTRADICTION_SIMILARITY_MIN = 0.85
+    CONTRADICTION_SIMILARITY_MAX = 0.95  # Above this is dedup, not contradiction
 
     def __init__(
         self,
@@ -120,7 +127,104 @@ class FactManager:
             },
         )
 
-        return self._to_detail(fact)
+        detail = self._to_detail(fact)
+
+        # Contradiction detection: similarity 0.85-0.95 with different content
+        if embedding is not None:
+            contradiction = await self._find_contradiction(
+                embedding, fact.content, exclude_ids + [fact.id], session
+            )
+            if contradiction is not None:
+                detail.contradiction_warning = contradiction
+
+        # Domain compaction check: emit event if too many facts in same category
+        if input.category:
+            await self._check_domain_threshold(input.category, session)
+
+        return detail
+
+    async def _find_contradiction(
+        self,
+        embedding: list[float],
+        new_content: str,
+        exclude_ids: list[UUID],
+        session: AsyncSession,
+    ) -> ContradictionWarning | None:
+        """Detect potential contradictions: similar embedding (0.85-0.95) but different content.
+
+        A contradiction is when two facts talk about the same thing but say
+        different things. High similarity means same topic; below dedup
+        threshold means different content.
+        """
+        embedding_str = "[" + ",".join(str(float(v)) for v in embedding) + "]"
+
+        params: dict = {
+            "embedding": embedding_str,
+            "agent_id": self.agent_id,
+            "sim_min": self.CONTRADICTION_SIMILARITY_MIN,
+            "sim_max": self.CONTRADICTION_SIMILARITY_MAX,
+        }
+
+        exclude_clause = ""
+        if exclude_ids:
+            placeholders = ", ".join(f":excl_{i}" for i in range(len(exclude_ids)))
+            exclude_clause = f"AND id NOT IN ({placeholders})"
+            for i, eid in enumerate(exclude_ids):
+                params[f"excl_{i}"] = eid
+
+        sql = text(f"""
+            SELECT id, content,
+                   1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM heart.facts
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND embedding IS NOT NULL
+              AND 1 - (embedding <=> CAST(:embedding AS vector)) > :sim_min
+              AND 1 - (embedding <=> CAST(:embedding AS vector)) <= :sim_max
+              {exclude_clause}
+            ORDER BY embedding <=> CAST(:embedding AS vector)
+            LIMIT 1
+        """)
+
+        result = await session.execute(sql, params)
+        row = result.first()
+        if row is None:
+            return None
+
+        return ContradictionWarning(
+            existing_fact_id=row.id,
+            existing_content=row.content[:500],
+            similarity=float(row.similarity),
+            message=f"Potential contradiction detected (similarity {row.similarity:.2f}). "
+            f"Existing fact: '{row.content[:100]}' — review and resolve.",
+        )
+
+    async def _check_domain_threshold(
+        self,
+        category: str,
+        session: AsyncSession,
+    ) -> None:
+        """Emit event if active fact count in a category exceeds threshold."""
+        sql = text("""
+            SELECT COUNT(*) AS cnt
+            FROM heart.facts
+            WHERE agent_id = :agent_id
+              AND category = :category
+              AND active = true
+        """)
+        result = await session.execute(sql, {"agent_id": self.agent_id, "category": category})
+        count = result.scalar() or 0
+
+        if count > self.DOMAIN_COMPACTION_THRESHOLD:
+            await self._emit_event(
+                session,
+                "fact_threshold_exceeded",
+                {
+                    "category": category,
+                    "count": count,
+                    "threshold": self.DOMAIN_COMPACTION_THRESHOLD,
+                },
+            )
 
     async def _find_duplicate(
         self,

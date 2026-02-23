@@ -84,6 +84,19 @@ class FactInput(BaseModel):
     tags: list[str] = []
 
 
+class ContradictionWarning(BaseModel):
+    """Warning returned when a potential contradiction is detected during learn().
+
+    Attached to the returned FactDetail.contradiction_warning field.
+    The new fact IS the FactDetail this warning is attached to.
+    """
+
+    existing_fact_id: UUID
+    existing_content: str
+    similarity: float
+    message: str
+
+
 class FactDetail(BaseModel):
     """Full fact with all fields."""
 
@@ -104,6 +117,7 @@ class FactDetail(BaseModel):
     active: bool
     tags: list[str]
     created_at: datetime
+    contradiction_warning: ContradictionWarning | None = None
 
 
 class FactSummary(BaseModel):
