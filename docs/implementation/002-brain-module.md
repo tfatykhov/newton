@@ -1,6 +1,6 @@
 # 002: Brain Module — Decision Intelligence Organ
 
-**Status:** Ready to Build
+**Status:** Shipped (PR #2)
 **Priority:** P0 — Core organ, everything depends on this
 **Estimated Effort:** 8-12 hours
 **Prerequisites:** 001-postgres-scaffold (merged)
@@ -619,14 +619,18 @@ This avoids hitting OpenAI during tests while still exercising vector storage an
 14. All event types logged to `nous_system.events`
 15. All tests pass: `pytest tests/test_brain.py tests/test_guardrails.py tests/test_calibration.py tests/test_quality.py -v`
 
+## Post-Ship Note (from research/013 — LangChain Memory Lessons)
+
+Brain.query() returns `DecisionSummary` objects. When consumed by the Cognitive Layer's ContextEngine (004), these MUST be rendered as clean markdown, not JSON dumps. LLMs read natural language better than structured data. The ContextEngine's `_format_decisions()` method handles this — Brain itself doesn't need changes, but be aware that the output format matters for LLM comprehension.
+
 ## Non-Goals (This Phase)
 
-- No REST API endpoints (implementation 003+)
-- No MCP tools (implementation 003+)
+- No REST API endpoints (implementation 004+)
+- No MCP tools (implementation 005+)
 - No LLM-based bridge extraction (heuristic only for now)
 - No drift detection (calibration snapshots + trend analysis is future)
 - No censor integration with Heart (Brain guardrails only for now)
-- No pre-action protocol (that's Cognitive Layer, F003)
+- No pre-action protocol (that's Cognitive Layer, F003/004)
 - No embedding rate limiting / retry logic (P2 enhancement)
 
 ## References

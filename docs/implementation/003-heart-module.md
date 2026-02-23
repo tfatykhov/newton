@@ -1,6 +1,6 @@
 # 003: Heart Module — Memory System Organ
 
-**Status:** Ready to Build
+**Status:** Shipped (PR #3)
 **Priority:** P0 — Core organ, Cognitive Layer needs this
 **Estimated Effort:** 8-12 hours
 **Prerequisites:** 001-postgres-scaffold (merged), 002-brain-module (merged)
@@ -736,14 +736,42 @@ async def heart(db, mock_embeddings):
 9. Embedding provider is optional (keyword-only fallback)
 10. All tests pass: `pytest tests/test_heart.py tests/test_episodes.py tests/test_facts.py tests/test_censors.py tests/test_working_memory.py -v`
 
+## Post-Ship Enhancements (from research/013 — LangChain Memory Lessons)
+
+The following enhancements were identified after 003 shipped. They should be added to Heart in a follow-up PR:
+
+### 1. Contradiction Detection on facts.learn()
+Before storing a new fact, check for contradictions:
+- Embedding similarity > 0.9 with existing active fact BUT different content
+- If detected, don't silently store both — return a `ContradictionWarning` with both facts
+- Let the Cognitive Layer (004) decide: supersede old, reject new, or flag for review
+- Implementation: add `check_contradictions()` method to FactManager
+
+### 2. Domain Fact Count Tracking
+Track fact count per domain to enable compaction triggers:
+- On `learn()`, if active facts in same domain > threshold (default 10), emit `fact_threshold_exceeded` event
+- Event Bus handler (F006) will trigger LLM-based generalization
+- Implementation: simple `SELECT COUNT(*) WHERE domain = ? AND status = 'active'` after insert
+
+### 3. Reflection-Compatible Episode Closing
+`end_episode()` already accepts `lessons` field. Ensure it can accept structured reflection output:
+- `lessons` as list of strings (each becomes extractable)
+- Cognitive Layer's `end_session()` will pass parsed "learned: X" lines from Runtime's LLM reflection
+- No code change needed if `lessons` is already `list[str]` — just document the contract
+
+### 4. Approval Flag on Behavioral Writes (v0.2.0)
+Future: Censors with severity="block" and new procedures should support a `requires_approval: bool` field.
+- Not implemented now — all writes are immediate
+- When HITL is added, these writes queue for approval instead of committing
+
 ## Non-Goals (This Phase)
 
 - No auto-extraction pipeline (LLM-based fact extraction from episodes) — requires LLM integration, future phase
 - No Brain↔Heart event bus coordination — that's F006 (Event Bus)
 - No REST API or MCP endpoints — implementation 004+
 - No memory lifecycle automation (auto-trim, auto-archive) — F008
-- No context budget system — F005 (Context Engine)
-- No summarization tiers — F005
+- No context budget system — merged into F003/004 (Cognitive Layer)
+- No summarization tiers — merged into F003/004 (Cognitive Layer)
 
 ## References
 

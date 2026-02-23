@@ -1,6 +1,6 @@
 # F002: Heart Module (Memory System)
 
-**Status:** Planned
+**Status:** Shipped
 **Priority:** P0 — Core organ
 **Origin:** New for Nous, informed by Minsky's memory theory
 **Detail:** See [008-database-design](../research/008-database-design.md), [009-context-management](../research/009-context-management.md), [010-summarization-strategy](../research/010-summarization-strategy.md)
