@@ -6,12 +6,12 @@ and its consumers (the Runtime in 005).
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class FrameType(str, Enum):
+class FrameType(StrEnum):
     TASK = "task"
     QUESTION = "question"
     DECISION = "decision"
