@@ -32,6 +32,38 @@ class Settings(BaseSettings):
     auto_link_max: int = 3
     quality_block_threshold: float = 0.5
 
+    # Runtime
+    host: str = "0.0.0.0"
+    port: int = 8000
+    anthropic_api_key: str = Field("", validation_alias="ANTHROPIC_API_KEY")
+    # Dual auth: auth_token takes precedence over api_key (SDK uses auth_token)
+    anthropic_auth_token: str = Field("", validation_alias="ANTHROPIC_AUTH_TOKEN")
+
+    # Agent identity
+    agent_name: str = "Nous"
+    agent_description: str = "A thinking agent that learns from experience"
+    identity_prompt: str = ""
+
+    # MCP
+    mcp_enabled: bool = True
+
+    # LLM
+    model: str = "claude-sonnet-4-5-20250514"
+    max_tokens: int = 4096
+
+    # SDK settings (claude-agent-sdk)
+    sdk_max_turns: int = 10  # Max tool use iterations per query
+    sdk_permission_mode: str = "default"  # default, acceptEdits, plan, bypassPermissions
+    sdk_workspace: str = "/tmp/nous-workspace"
+    sdk_allowed_tools: list[str] = Field(
+        default_factory=lambda: [
+            "record_decision",
+            "learn_fact",
+            "recall_deep",
+            "create_censor",
+        ]
+    )
+
     @property
     def db_url(self) -> str:
         return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"

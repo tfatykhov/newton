@@ -221,7 +221,7 @@ def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
                         results_text.append("=== Heart Memory ===")
                         for i, result in enumerate(heart_results, 1):
                             results_text.append(
-                                f"{i}. [{result.memory_type}] {result.content} (score: {result.score:.3f})"
+                                f"{i}. [{result.type}] {result.summary} (score: {result.score:.3f})"
                             )
                     else:
                         results_text.append("=== Heart Memory ===\nNo results found.")
@@ -315,3 +315,177 @@ def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
         "recall_deep": recall_deep,
         "create_censor": create_censor,
     }
+
+
+# ---------------------------------------------------------------------------
+# SDK MCP server registration
+# ---------------------------------------------------------------------------
+
+# JSON Schema definitions for each tool's input parameters.
+# Used by claude-agent-sdk @tool decorator so Claude knows
+# what arguments each tool accepts.
+
+_RECORD_DECISION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "description": {"type": "string", "description": "What was decided"},
+        "confidence": {
+            "type": "number",
+            "description": "0.0-1.0 confidence level",
+            "minimum": 0.0,
+            "maximum": 1.0,
+        },
+        "category": {
+            "type": "string",
+            "description": "Decision category",
+            "enum": ["architecture", "process", "tooling", "security", "integration"],
+        },
+        "stakes": {
+            "type": "string",
+            "description": "Stakes level",
+            "enum": ["low", "medium", "high", "critical"],
+        },
+        "context": {"type": "string", "description": "Situation and constraints"},
+        "pattern": {"type": "string", "description": "Abstract pattern this decision represents"},
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Keywords for filtering",
+        },
+        "reasons": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "analysis",
+                            "pattern",
+                            "empirical",
+                            "authority",
+                            "analogy",
+                            "intuition",
+                            "elimination",
+                            "constraint",
+                        ],
+                    },
+                    "text": {"type": "string"},
+                },
+                "required": ["type", "text"],
+            },
+            "description": "Supporting reasons",
+        },
+    },
+    "required": ["description", "confidence", "category", "stakes"],
+}
+
+_LEARN_FACT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "content": {"type": "string", "description": "The fact content"},
+        "category": {
+            "type": "string",
+            "description": "Fact category",
+            "enum": ["preference", "technical", "person", "tool", "concept", "rule"],
+        },
+        "subject": {"type": "string", "description": "What/who the fact is about"},
+        "confidence": {
+            "type": "number",
+            "description": "0.0-1.0 confidence level",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "default": 1.0,
+        },
+        "source": {"type": "string", "description": "Where this fact came from"},
+        "source_episode_id": {"type": "string", "description": "Episode UUID"},
+        "source_decision_id": {"type": "string", "description": "Decision UUID"},
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Keywords for filtering",
+        },
+    },
+    "required": ["content"],
+}
+
+_RECALL_DEEP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string", "description": "Search query string"},
+        "limit": {
+            "type": "integer",
+            "description": "Maximum results to return",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50,
+        },
+        "memory_types": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": ["all", "episode", "fact", "procedure", "censor", "decision"],
+            },
+            "description": "Types to search. If omitted or contains 'all', searches everything.",
+        },
+    },
+    "required": ["query"],
+}
+
+_CREATE_CENSOR_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "trigger_pattern": {
+            "type": "string",
+            "description": "Pattern to match (substring or regex)",
+        },
+        "reason": {"type": "string", "description": "Why this censor exists"},
+        "action": {
+            "type": "string",
+            "description": "Censor action",
+            "enum": ["warn", "block", "absolute"],
+            "default": "warn",
+        },
+        "domain": {"type": "string", "description": "Domain this censor applies to"},
+        "learned_from_decision": {"type": "string", "description": "Decision UUID"},
+        "learned_from_episode": {"type": "string", "description": "Episode UUID"},
+    },
+    "required": ["trigger_pattern", "reason"],
+}
+
+
+def create_nous_mcp_server(brain: Brain, heart: Heart) -> Any:
+    """Create an in-process MCP server with Nous tools for the Claude Agent SDK.
+
+    Wraps the closure-based tools from ``create_nous_tools`` with SDK ``@tool``
+    decorators and bundles them into a ``McpSdkServerConfig`` suitable for
+    ``ClaudeAgentOptions.mcp_servers``.
+
+    Returns:
+        ``McpSdkServerConfig`` dict (``{"type": "sdk", "name": ..., "instance": ...}``).
+    """
+    from claude_agent_sdk import create_sdk_mcp_server, tool
+
+    closures = create_nous_tools(brain, heart)
+
+    @tool("record_decision", "Record a decision to the Brain (decision intelligence organ)", _RECORD_DECISION_SCHEMA)
+    async def sdk_record_decision(args: dict[str, Any]) -> dict[str, Any]:
+        return await closures["record_decision"](**args)
+
+    @tool("learn_fact", "Store a fact in the Heart (memory system)", _LEARN_FACT_SCHEMA)
+    async def sdk_learn_fact(args: dict[str, Any]) -> dict[str, Any]:
+        return await closures["learn_fact"](**args)
+
+    @tool("recall_deep", "Search across all memory types in Heart and Brain", _RECALL_DEEP_SCHEMA)
+    async def sdk_recall_deep(args: dict[str, Any]) -> dict[str, Any]:
+        return await closures["recall_deep"](**args)
+
+    @tool("create_censor", "Create a guardrail censor in the Heart", _CREATE_CENSOR_SCHEMA)
+    async def sdk_create_censor(args: dict[str, Any]) -> dict[str, Any]:
+        return await closures["create_censor"](**args)
+
+    return create_sdk_mcp_server(
+        "nous",
+        version="0.1.0",
+        tools=[sdk_record_decision, sdk_learn_fact, sdk_recall_deep, sdk_create_censor],
+    )

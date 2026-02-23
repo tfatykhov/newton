@@ -81,6 +81,75 @@ class Brain:
         await self.close()
 
     # ------------------------------------------------------------------
+    # list_decisions()
+    # ------------------------------------------------------------------
+
+    async def list_decisions(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        agent_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> tuple[list[DecisionSummary], int]:
+        """List decisions ordered by created_at DESC. Returns (decisions, total_count)."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._list_decisions(limit, offset, agent_id, session)
+        return await self._list_decisions(limit, offset, agent_id, session)
+
+    async def _list_decisions(
+        self,
+        limit: int,
+        offset: int,
+        agent_id: str | None,
+        session: AsyncSession,
+    ) -> tuple[list[DecisionSummary], int]:
+        _agent_id = agent_id or self.agent_id
+
+        # Count total
+        count_result = await session.execute(
+            text("SELECT COUNT(*) FROM brain.decisions WHERE agent_id = :agent_id"),
+            {"agent_id": _agent_id},
+        )
+        total = count_result.scalar() or 0
+
+        # Fetch page
+        result = await session.execute(
+            select(Decision)
+            .where(Decision.agent_id == _agent_id)
+            .order_by(Decision.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        decisions = list(result.scalars().all())
+
+        if not decisions:
+            return [], total
+
+        # Fetch tags (P2-17: separate query)
+        decision_ids = [d.id for d in decisions]
+        tag_result = await session.execute(select(DecisionTag).where(DecisionTag.decision_id.in_(decision_ids)))
+        tags_by_id: dict[UUID, list[str]] = defaultdict(list)
+        for t in tag_result.scalars().all():
+            tags_by_id[t.decision_id].append(t.tag)
+
+        summaries = [
+            DecisionSummary(
+                id=d.id,
+                description=d.description,
+                confidence=d.confidence,
+                category=d.category,
+                stakes=d.stakes,
+                outcome=d.outcome or "pending",
+                pattern=d.pattern,
+                tags=tags_by_id.get(d.id, []),
+                created_at=d.created_at,
+            )
+            for d in decisions
+        ]
+        return summaries, total
+
+    # ------------------------------------------------------------------
     # record()
     # ------------------------------------------------------------------
 
