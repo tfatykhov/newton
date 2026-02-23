@@ -181,11 +181,18 @@ class AgentRunner:
         """
         _agent_id = agent_id or self._settings.agent_id
 
-    async def end_conversation(self, session_id: str) -> None:
-        """End a conversation and clean up.
+    async def end_conversation(self, session_id: str, agent_id: str | None = None) -> None:
+        """End a conversation with reflection.
 
-        1. Call cognitive.end_session()
-        2. Remove from self._conversations
+        1. If conversation has >= 3 turns, generate reflection:
+           - Call Anthropic API with conversation history + prompt:
+             "Review this conversation. What was learned? List key facts as
+              'learned: <fact>' lines. What went well? What should be done
+              differently next time?"
+           - This is the ONLY place the cognitive layer receives LLM-generated
+             reflection. CognitiveLayer.end_session() itself makes no LLM calls.
+        2. Call cognitive.end_session(reflection=reflection_text)
+        3. Remove from self._conversations
         """
 
     def _get_or_create_conversation(self, session_id: str) -> Conversation:
