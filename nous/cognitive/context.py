@@ -95,14 +95,14 @@ class ContextEngine:
                 budget.apply_overrides(retrieval_plan.budget_overrides)
             skip_types = retrieval_plan.skip_types
 
-        # Determine query text and limits from plan
-        _query_text = input_text
+        # Determine per-type query text and limits from plan
+        _query_texts: dict[str, str] = {}
         _limits: dict[str, int] = {}
         if retrieval_plan and retrieval_plan.queries:
             for q in retrieval_plan.queries:
                 _limits[q.memory_type] = q.limit
                 if q.query_text:
-                    _query_text = q.query_text  # Use plan's query text
+                    _query_texts[q.memory_type] = q.query_text
 
         # Trim conversation_messages to budget.conversation_window (F13)
         _conv_msgs = conversation_messages
@@ -175,7 +175,8 @@ class ContextEngine:
         if budget.decisions > 0 and "decision" not in skip_types:
             try:
                 limit = _limits.get("decision", 5)
-                decisions = await self._brain.query(_query_text, limit=limit, session=session)
+                q_text = _query_texts.get("decision", input_text)
+                decisions = await self._brain.query(q_text, limit=limit, session=session)
                 if decisions:
                     # F1: Collect recalled IDs
                     for d in decisions:
@@ -205,7 +206,8 @@ class ContextEngine:
         if budget.facts > 0 and "fact" not in skip_types:
             try:
                 limit = _limits.get("fact", 5)
-                facts = await self._heart.search_facts(_query_text, limit=limit, session=session)
+                q_text = _query_texts.get("fact", input_text)
+                facts = await self._heart.search_facts(q_text, limit=limit, session=session)
                 if facts:
                     # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
@@ -242,7 +244,8 @@ class ContextEngine:
         if budget.procedures > 0 and "procedure" not in skip_types:
             try:
                 limit = _limits.get("procedure", 5)
-                procedures = await self._heart.search_procedures(_query_text, limit=limit, session=session)
+                q_text = _query_texts.get("procedure", input_text)
+                procedures = await self._heart.search_procedures(q_text, limit=limit, session=session)
                 if procedures:
                     # F10: apply_frame_boost
                     procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
@@ -275,7 +278,8 @@ class ContextEngine:
         if budget.episodes > 0 and "episode" not in skip_types:
             try:
                 limit = _limits.get("episode", 5)
-                episodes = await self._heart.search_episodes(_query_text, limit=limit, session=session)
+                q_text = _query_texts.get("episode", input_text)
+                episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
                 if episodes:
                     # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)

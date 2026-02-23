@@ -129,9 +129,10 @@ class AgentRunner:
         conversation = self._get_or_create_conversation(session_id)
 
         # 2. Pre-turn (F4: plumb conversation_messages for dedup)
+        # Filter to user messages first, then take last 8 (D7: window = user turns)
         recent_messages = [
-            m.content for m in conversation.messages[-8:] if m.role == "user"
-        ]
+            m.content for m in conversation.messages if m.role == "user"
+        ][-8:]
         turn_context = await self._cognitive.pre_turn(
             _agent_id,
             session_id,
