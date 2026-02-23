@@ -268,7 +268,12 @@ async def test_post_turn_no_finalize_without_decision(cognitive, session):
 
 
 async def test_post_turn_creates_censor_on_failure(cognitive, heart, session):
-    """Tool error in post_turn creates a censor via MonitorEngine."""
+    """Turn-level error with tool errors creates a censor via MonitorEngine.
+
+    MonitorEngine.learn() only creates censors when surprise > 0.7.
+    Tool errors alone give surprise=0.3 (below threshold).
+    A turn-level error gives surprise=0.9 AND tool errors provide censor candidates.
+    """
     sid = f"test-post-censor-{uuid.uuid4().hex[:8]}"
     ctx = await cognitive.pre_turn(
         "nous-default", sid, "build something", session=session
@@ -276,6 +281,7 @@ async def test_post_turn_creates_censor_on_failure(cognitive, heart, session):
 
     turn_result = TurnResult(
         response_text="Failed to write file.",
+        error="Turn failed due to permission error",
         tool_results=[
             ToolResult(
                 tool_name="file_write",
@@ -289,7 +295,7 @@ async def test_post_turn_creates_censor_on_failure(cognitive, heart, session):
         "nous-default", sid, turn_result, ctx, session=session
     )
 
-    # A censor should have been created
+    # A censor should have been created (surprise=0.9 > 0.7 threshold)
     censors = await heart.list_censors(session=session)
     # At least one censor related to file_write
     assert any("file_write" in c.trigger_pattern or "restricted" in c.trigger_pattern for c in censors)
@@ -464,7 +470,11 @@ async def test_full_loop_decision(cognitive, brain, heart, session):
 
 
 async def test_full_loop_with_error(cognitive, brain, heart, session):
-    """Full loop: pre_turn(task) -> post_turn(tool_error) -> censor created."""
+    """Full loop: pre_turn(task) -> post_turn(turn error + tool error) -> censor created.
+
+    Censors only created when surprise > 0.7. Turn-level error gives 0.9,
+    tool errors provide censor candidates via _error_to_censor_text().
+    """
     sid = f"test-loop-error-{uuid.uuid4().hex[:8]}"
 
     # pre_turn
@@ -472,9 +482,10 @@ async def test_full_loop_with_error(cognitive, brain, heart, session):
         "nous-default", sid, "deploy the application", session=session
     )
 
-    # post_turn with tool error
+    # post_turn with turn-level error AND tool error
     turn_result = TurnResult(
         response_text="Deployment failed.",
+        error="Deployment process encountered a fatal error",
         tool_results=[
             ToolResult(
                 tool_name="deploy",
@@ -486,12 +497,12 @@ async def test_full_loop_with_error(cognitive, brain, heart, session):
     assessment = await cognitive.post_turn(
         "nous-default", sid, turn_result, ctx, session=session
     )
-    assert assessment.surprise_level > 0
+    assert assessment.surprise_level == 0.9
 
     # end_session
     await cognitive.end_session("nous-default", sid, session=session)
 
-    # Verify censor was created
+    # Verify censor was created (surprise=0.9 > 0.7 threshold)
     censors = await heart.list_censors(session=session)
     assert any("deploy" in c.trigger_pattern or "production" in c.trigger_pattern for c in censors)
 
