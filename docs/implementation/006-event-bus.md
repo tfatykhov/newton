@@ -419,7 +419,7 @@ class EpisodeSummarizer:
             response = await self._http.post(
                 "https://api.anthropic.com/v1/messages",
                 json={
-                    "model": "claude-sonnet-4-5-20250514",  # Cheap model for summaries
+                    "model": self._settings.background_model,  # Cheap model for summaries
                     "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -590,7 +590,7 @@ class FactExtractor:
             response = await self._http.post(
                 "https://api.anthropic.com/v1/messages",
                 json={
-                    "model": "claude-sonnet-4-5-20250514",
+                    "model": self._settings.background_model,
                     "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -701,7 +701,10 @@ if handler_http:
 event_bus_enabled: bool = True
 episode_summary_enabled: bool = True
 fact_extraction_enabled: bool = True
+background_model: str = Field("claude-sonnet-4-5-20250514", validation_alias="NOUS_BACKGROUND_MODEL")
 ```
+
+The `background_model` is used by all handlers that make LLM calls (Episode Summarizer, Fact Extractor). Configurable via `NOUS_BACKGROUND_MODEL` env var. Defaults to Sonnet for cost efficiency, but can be set to any model (e.g., `claude-haiku-3-5-20241022` for cheaper, or `claude-opus-4-6` for higher quality).
 
 ## Phase H: Transcript Capture
 
@@ -856,7 +859,7 @@ class TestUserTagging:
 | D2 | Fire-and-forget emit (non-blocking) | Callers (pre_turn, post_turn) must not be slowed by handler execution. QueueFull drops, doesn't block. |
 | D3 | DB persistence via adapter, not inside bus | Keeps bus generic. Existing Brain.emit_event() pattern preserved as an adapter function. |
 | D4 | Separate httpx client for handlers | Handlers make LLM calls. Separate from runner's client (different timeouts, no auth header conflicts). |
-| D5 | Sonnet for summaries/extraction | Cheap model for background work. ~$0.003 per summary. Not worth using Opus. |
+| D5 | Background model configurable via `NOUS_BACKGROUND_MODEL` | Defaults to Sonnet (~$0.003 per summary). Configurable for cost/quality tradeoffs. Haiku for cheaper, Opus for higher quality. |
 | D6 | Feature flags per handler | Can disable episode summaries or fact extraction independently without stopping the bus. |
 | D7 | Transcript in SessionMetadata | Ephemeral, in-memory. No DB schema change needed. Flows through session_ended event to summarizer. |
 | D8 | Max 5 facts per episode | Prevents over-accumulation from chatty conversations. |
