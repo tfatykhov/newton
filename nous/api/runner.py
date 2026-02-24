@@ -141,6 +141,10 @@ def _parse_sse_event(data: dict[str, Any]) -> StreamEvent | None:
             usage=usage,
         )
 
+    if event_type == "message_start":
+        usage = data.get("message", {}).get("usage")
+        return StreamEvent(type="message_start", usage=usage)
+
     if event_type == "message_stop":
         return StreamEvent(type="message_stop")
 
@@ -560,6 +564,10 @@ class AgentRunner:
                         error = event.text
                         yield event
                         return
+
+                    elif event.type == "message_start":
+                        if event.usage:
+                            total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
 
                     elif event.type == "text_delta":
                         text_parts.append(event.text)

@@ -33,6 +33,15 @@ TG_API = "https://api.telegram.org/bot{token}/{method}"
 TG_MAX_LEN = 4096
 
 
+def format_usage_footer(usage: dict[str, int]) -> str:
+    """Format token usage as a compact footer string."""
+    inp = usage.get("input_tokens", 0)
+    out = usage.get("output_tokens", 0)
+    inp_str = f"{inp / 1000:.1f}K" if inp >= 1000 else str(inp)
+    out_str = f"{out / 1000:.1f}K" if out >= 1000 else str(out)
+    return f"\U0001f4ca {inp_str} in / {out_str} out"
+
+
 class StreamingMessage:
     """Manages progressive message editing for Telegram streaming."""
 
@@ -63,6 +72,11 @@ class StreamingMessage:
     def set_usage(self, usage: dict[str, int]) -> None:
         """Set token usage for the footer."""
         self._usage = usage
+
+    async def append_text(self, text: str) -> None:
+        """Append text delta to the base text and update display."""
+        self._base_text += text
+        await self.update(self._base_text)
 
     async def update(self, new_text: str) -> None:
         """Update message text. Creates on first call, edits after."""
@@ -106,11 +120,7 @@ class StreamingMessage:
 
         # Append usage footer if available
         if self._usage:
-            inp = self._usage.get("input_tokens", 0)
-            out = self._usage.get("output_tokens", 0)
-            inp_str = f"{inp / 1000:.1f}K" if inp >= 1000 else str(inp)
-            out_str = f"{out / 1000:.1f}K" if out >= 1000 else str(out)
-            self.text += f"\n\n\U0001f4ca {inp_str} in / {out_str} out"
+            self.text += f"\n\n{format_usage_footer(self._usage)}"
 
         if self._pending or self.message_id is None:
             await self._send_or_edit()
@@ -290,11 +300,7 @@ class NousTelegramBot:
             # Add usage footer if available
             usage = data.get("usage")
             if usage:
-                inp = usage.get("input_tokens", 0)
-                out = usage.get("output_tokens", 0)
-                inp_str = f"{inp / 1000:.1f}K" if inp >= 1000 else str(inp)
-                out_str = f"{out / 1000:.1f}K" if out >= 1000 else str(out)
-                reply += f"\n\n\U0001f4ca {inp_str} in / {out_str} out"
+                reply += f"\n\n{format_usage_footer(usage)}"
 
             # Split long messages
             full_reply = f"{frame_tag}\n\n{reply}"
@@ -346,8 +352,7 @@ class NousTelegramBot:
                     event = json.loads(line[6:])
 
                     if event.get("type") == "text_delta":
-                        streamer._base_text += event.get("text", "")
-                        await streamer.update(streamer._base_text)
+                        await streamer.append_text(event.get("text", ""))
                     elif event.get("type") == "tool_start":
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
                     elif event.get("type") == "error":

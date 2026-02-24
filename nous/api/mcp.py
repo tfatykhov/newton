@@ -218,7 +218,7 @@ def create_mcp_server(
     async def _handle_chat(args: dict) -> list[TextContent]:
         message = args["message"]
         session_id = args.get("session_id", "mcp-session")
-        response_text, turn_context = await runner.run_turn(session_id, message)
+        response_text, turn_context, _usage = await runner.run_turn(session_id, message)
         result = {
             "response": response_text,
             "session_id": session_id,
@@ -339,7 +339,7 @@ def create_mcp_server(
         message = f"Decision (stakes: {stakes}): {question}"
         session_id = "mcp-decision"
 
-        response_text, turn_context = await runner.run_turn(session_id, message)
+        response_text, turn_context, _usage = await runner.run_turn(session_id, message)
         result = {
             "response": response_text,
             "decision_id": turn_context.decision_id,
