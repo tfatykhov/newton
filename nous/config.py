@@ -44,6 +44,28 @@ class Settings(BaseSettings):
     agent_description: str = "A thinking agent that learns from experience"
     identity_prompt: str = ""
 
+    # Event Bus
+    event_bus_enabled: bool = True
+    episode_summary_enabled: bool = True
+    fact_extraction_enabled: bool = True
+    sleep_enabled: bool = True
+    background_model: str = Field(
+        default="claude-sonnet-4-5-20250514",
+        validation_alias="NOUS_BACKGROUND_MODEL",
+    )
+    session_idle_timeout: int = Field(
+        default=1800,
+        validation_alias="NOUS_SESSION_TIMEOUT",
+    )
+    sleep_timeout: int = Field(
+        default=7200,
+        validation_alias="NOUS_SLEEP_TIMEOUT",
+    )
+    sleep_check_interval: int = Field(
+        default=60,
+        validation_alias="NOUS_SLEEP_CHECK_INTERVAL",
+    )
+
     # MCP
     mcp_enabled: bool = True
 

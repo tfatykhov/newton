@@ -31,6 +31,8 @@ class EpisodeInput(BaseModel):
     trigger: str | None = None  # user_message, cron, hook, etc.
     participants: list[str] = []
     tags: list[str] = []
+    user_id: str | None = None
+    user_display_name: str | None = None
 
 
 class EpisodeDetail(BaseModel):
@@ -52,6 +54,9 @@ class EpisodeDetail(BaseModel):
     lessons_learned: list[str]
     tags: list[str]
     decision_ids: list[UUID]  # From episode_decisions join
+    structured_summary: dict | None = None
+    user_id: str | None = None
+    user_display_name: str | None = None
     created_at: datetime
 
 
@@ -64,6 +69,7 @@ class EpisodeSummary(BaseModel):
     outcome: EpisodeOutcome | None
     started_at: datetime
     tags: list[str]
+    structured_summary: dict | None = None
     score: float | None = None  # Relevance from search
 
 

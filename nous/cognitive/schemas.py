@@ -21,6 +21,7 @@ class SessionMetadata:
     total_user_chars: int = 0
     total_assistant_chars: int = 0
     has_explicit_remember: bool = False
+    transcript: list[str] = field(default_factory=list)
 
 
 class FrameType(StrEnum):

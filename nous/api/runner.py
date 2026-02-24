@@ -248,6 +248,8 @@ class AgentRunner:
         session_id: str,
         user_message: str,
         agent_id: str | None = None,
+        user_id: str | None = None,
+        user_display_name: str | None = None,
     ) -> tuple[str, TurnContext]:
         """Execute a single conversational turn.
 
@@ -276,6 +278,8 @@ class AgentRunner:
             session_id,
             user_message,
             conversation_messages=recent_messages or None,
+            user_id=user_id,
+            user_display_name=user_display_name,
         )
 
         # 3. Append user message
@@ -498,6 +502,8 @@ class AgentRunner:
         session_id: str,
         user_message: str,
         agent_id: str | None = None,
+        user_id: str | None = None,
+        user_display_name: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Full chat turn with streaming, including tool loops.
 
@@ -519,6 +525,8 @@ class AgentRunner:
             session_id,
             user_message,
             conversation_messages=recent_messages or None,
+            user_id=user_id,
+            user_display_name=user_display_name,
         )
 
         conversation.messages.append(Message(role="user", content=user_message))

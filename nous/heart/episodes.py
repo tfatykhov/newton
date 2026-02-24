@@ -82,6 +82,8 @@ class EpisodeManager:
             participants=input.participants or None,
             tags=input.tags or None,
             embedding=embedding,
+            user_id=input.user_id,
+            user_display_name=input.user_display_name,
         )
         session.add(episode)
         await session.flush()
@@ -91,6 +93,31 @@ class EpisodeManager:
         # Re-fetch with eager loading to avoid lazy-load MissingGreenlet
         episode = await self._get_episode_orm(episode.id, session)
         return self._to_detail(episode)
+
+    # ------------------------------------------------------------------
+    # update_summary()
+    # ------------------------------------------------------------------
+
+    async def update_summary(
+        self, episode_id: UUID, summary: dict, session: AsyncSession | None = None
+    ) -> None:
+        """Store structured summary on episode."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._update_summary(episode_id, summary, session)
+                await session.commit()
+                return
+        await self._update_summary(episode_id, summary, session)
+
+    async def _update_summary(
+        self, episode_id: UUID, summary: dict, session: AsyncSession
+    ) -> None:
+        stmt = select(Episode).where(Episode.id == episode_id)
+        result = await session.execute(stmt)
+        episode = result.scalar_one_or_none()
+        if episode:
+            episode.structured_summary = summary
+            await session.flush()
 
     # ------------------------------------------------------------------
     # end()
@@ -442,5 +469,8 @@ class EpisodeManager:
             lessons_learned=episode.lessons_learned or [],
             tags=episode.tags or [],
             decision_ids=decision_ids,
+            structured_summary=episode.structured_summary,
+            user_id=episode.user_id,
+            user_display_name=episode.user_display_name,
             created_at=episode.created_at,
         )

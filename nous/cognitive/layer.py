@@ -25,6 +25,7 @@ from nous.cognitive.monitor import MonitorEngine
 from nous.cognitive.schemas import Assessment, SessionMetadata, TurnContext, TurnResult
 from nous.cognitive.usage_tracker import UsageTracker
 from nous.config import Settings
+from nous.events import Event, EventBus
 from nous.heart.heart import Heart
 from nous.heart.schemas import EpisodeInput, FactInput
 
@@ -64,10 +65,13 @@ class CognitiveLayer:
         heart: Heart,
         settings: Settings,
         identity_prompt: str = "",
+        *,
+        bus: EventBus | None = None,
     ) -> None:
         self._brain = brain
         self._heart = heart
         self._settings = settings
+        self._bus = bus
         # P1-1: Use brain.db (public), not brain._db
         self._frames = FrameEngine(brain.db, settings)
         # F3: Instantiate IntentClassifier and UsageTracker
@@ -106,6 +110,8 @@ class CognitiveLayer:
         session: AsyncSession | None = None,
         *,
         conversation_messages: list[str] | None = None,
+        user_id: str | None = None,
+        user_display_name: str | None = None,
     ) -> TurnContext:
         """SENSE -> FRAME -> RECALL -> DELIBERATE — prepare for LLM turn.
 
@@ -124,6 +130,8 @@ class CognitiveLayer:
         Args:
             conversation_messages: Recent user messages for dedup (F4).
                 Optional — without it, dedup is skipped (backward compat).
+            user_id: Optional user identifier for episode tracking.
+            user_display_name: Optional user display name for episode tracking.
         """
         # 1b. Track user input for significance (005.5 Phase A)
         meta = self._session_metadata.setdefault(session_id, SessionMetadata())
@@ -131,6 +139,9 @@ class CognitiveLayer:
         # Check for explicit remember request
         if any(kw in user_input.lower() for kw in ("remember this", "remember that", "don't forget", "save this")):
             meta.has_explicit_remember = True
+
+        # 006: Transcript capture
+        meta.transcript.append(f"User: {user_input[:500]}")
 
         # 2. FRAME — select cognitive frame (F5: agent_id first)
         try:
@@ -197,6 +208,8 @@ class CognitiveLayer:
                             summary=user_input[:200],
                             frame_used=frame.frame_id,
                             trigger="user_message",
+                            user_id=user_id,
+                            user_display_name=user_display_name,
                         )
                         episode = await self._heart.start_episode(episode_input, session=session)
                         self._active_episodes[session_id] = str(episode.id)
@@ -336,19 +349,27 @@ class CognitiveLayer:
         for tr in turn_result.tool_results:
             meta.tools_used.add(tr.tool_name)
 
-        # 6. EMIT EVENT — P2-7: delegate to Brain.emit_event()
+        # 006: Transcript capture
+        meta.transcript.append(f"Assistant: {turn_result.response_text[:500]}")
+
+        # 6. EMIT EVENT — P1-1: bus.emit with backward compat else branch
+        event_data = {
+            "session_id": session_id,
+            "frame": turn_context.frame.frame_id,
+            "surprise_level": assessment.surprise_level,
+            "decision_id": decision_id,
+            "has_errors": turn_result.error is not None,
+        }
         try:
-            await self._brain.emit_event(
-                "turn_completed",
-                {
-                    "session_id": session_id,
-                    "frame": turn_context.frame.frame_id,
-                    "surprise_level": assessment.surprise_level,
-                    "decision_id": decision_id,
-                    "has_errors": turn_result.error is not None,
-                },
-                session=session,
-            )
+            if self._bus:
+                await self._bus.emit(Event(
+                    type="turn_completed",
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    data=event_data,
+                ))
+            else:
+                await self._brain.emit_event("turn_completed", event_data, session=session)
         except Exception:
             logger.warning("Failed to emit turn_completed event")
 
@@ -520,16 +541,25 @@ class CognitiveLayer:
         # 3. Clean up monitor session censor counts
         self._monitor._session_censor_counts.pop(session_id, None)
 
-        # 4. Emit session_ended event — P2-7: delegate to Brain.emit_event()
+        # 4. Emit session_ended event — 006: bus.emit with backward compat
+        transcript_text = "\n\n".join(meta.transcript) if meta else ""
+        event_data = {
+            "session_id": session_id,
+            "episode_id": episode_id,
+            "transcript": transcript_text,
+            "reflection": reflection[:200] if reflection else None,
+            "had_reflection": reflection is not None,
+            "facts_extracted": facts_extracted,
+        }
         try:
-            await self._brain.emit_event(
-                "session_ended",
-                {
-                    "session_id": session_id,
-                    "had_reflection": reflection is not None,
-                    "facts_extracted": facts_extracted,
-                },
-                session=session,
-            )
+            if self._bus:
+                await self._bus.emit(Event(
+                    type="session_ended",
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    data=event_data,
+                ))
+            else:
+                await self._brain.emit_event("session_ended", event_data, session=session)
         except Exception:
             logger.warning("Failed to emit session_ended event")

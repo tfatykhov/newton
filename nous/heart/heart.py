@@ -154,6 +154,12 @@ class Heart:
         """Soft-delete a trivial episode."""
         await self.episodes.deactivate(episode_id, session=session)
 
+    async def update_episode_summary(
+        self, episode_id: UUID, summary: dict, session: AsyncSession | None = None
+    ) -> None:
+        """Store structured summary on episode."""
+        await self.episodes.update_summary(episode_id, summary, session=session)
+
     async def search_episodes(
         self,
         query: str,

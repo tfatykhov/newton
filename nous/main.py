@@ -26,6 +26,7 @@ from nous.brain import Brain
 from nous.brain.embeddings import EmbeddingProvider
 from nous.cognitive import CognitiveLayer
 from nous.config import Settings
+from nous.events import Event, EventBus
 from nous.heart import Heart
 from nous.storage.database import Database
 
@@ -57,7 +58,67 @@ async def create_components(settings: Settings) -> dict:
 
     brain = Brain(database, settings, embedding_provider)
     heart = Heart(database, settings, embedding_provider, owns_embeddings=False)  # F4
-    cognitive = CognitiveLayer(brain, heart, settings, settings.identity_prompt)
+
+    # 006: Create EventBus (only if enabled)
+    bus = None
+    handler_http = None
+    session_monitor = None
+    if settings.event_bus_enabled:
+        bus = EventBus()
+
+        # DB persistence adapter (P0-1 fix: correct signature — no agent_id/session_id kwargs)
+        async def persist_to_db(event: Event) -> None:
+            data = {**event.data}
+            if event.session_id:
+                data["session_id"] = event.session_id
+            await brain.emit_event(event.type, data)
+
+        bus.set_db_persister(persist_to_db)
+
+    # P0-2/P0-3 fix: preserve identity_prompt, pass bus as keyword arg
+    cognitive = CognitiveLayer(brain, heart, settings, settings.identity_prompt, bus=bus)
+
+    # 006: Register handlers on bus (after cognitive exists for monitor)
+    if bus is not None:
+        handler_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
+        )
+
+        try:
+            from nous.handlers.episode_summarizer import EpisodeSummarizer
+
+            if settings.episode_summary_enabled:
+                EpisodeSummarizer(heart, settings, bus, handler_http)
+        except ImportError:
+            logger.debug("EpisodeSummarizer not available yet")
+
+        try:
+            from nous.handlers.fact_extractor import FactExtractor
+
+            if settings.fact_extraction_enabled:
+                FactExtractor(heart, settings, bus, handler_http)
+        except ImportError:
+            logger.debug("FactExtractor not available yet")
+
+        try:
+            from nous.handlers.session_monitor import SessionTimeoutMonitor
+
+            session_monitor = SessionTimeoutMonitor(bus, settings, cognitive=cognitive)
+        except ImportError:
+            logger.debug("SessionTimeoutMonitor not available yet")
+
+        try:
+            from nous.handlers.sleep_handler import SleepHandler
+
+            if settings.sleep_enabled:
+                SleepHandler(brain, heart, settings, bus, handler_http)
+        except ImportError:
+            logger.debug("SleepHandler not available yet")
+
+        # Start bus + monitor
+        await bus.start()
+        if session_monitor:
+            await session_monitor.start()
 
     # Create tool dispatcher and register all tools
     dispatcher = ToolDispatcher()
@@ -84,12 +145,28 @@ async def create_components(settings: Settings) -> dict:
         "dispatcher": dispatcher,
         "embedding_provider": embedding_provider,
         "web_http": web_http,
+        "bus": bus,
+        "session_monitor": session_monitor,
+        "handler_http": handler_http,
     }
 
 
 async def shutdown_components(components: dict) -> None:
     """Graceful shutdown in reverse order."""
     logger.info("Shutting down Nous...")
+
+    # 006: Stop session monitor and event bus first
+    session_monitor = components.get("session_monitor")
+    if session_monitor:
+        await session_monitor.stop()
+
+    bus = components.get("bus")
+    if bus:
+        await bus.stop()
+
+    handler_http = components.get("handler_http")
+    if handler_http:
+        await handler_http.aclose()
 
     web_http = components.get("web_http")
     if web_http:
