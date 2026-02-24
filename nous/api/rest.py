@@ -60,15 +60,24 @@ def create_app(
         session_id = body.get("session_id") or str(uuid4())
 
         try:
+            debug = body.get("debug", False)
             response_text, turn_context = await runner.run_turn(session_id, message)
-            return JSONResponse(
-                {
-                    "response": response_text,
-                    "session_id": session_id,
-                    "frame": turn_context.frame.frame_id,
-                    "decision_id": turn_context.decision_id,
+            result: dict[str, Any] = {
+                "response": response_text,
+                "session_id": session_id,
+                "frame": turn_context.frame.frame_id,
+                "decision_id": turn_context.decision_id,
+            }
+            if debug:
+                result["debug"] = {
+                    "system_prompt": turn_context.system_prompt,
+                    "frame_confidence": turn_context.frame.confidence,
+                    "active_censors": len(turn_context.censors),
+                    "related_decisions": len(turn_context.decisions),
+                    "related_facts": len(turn_context.facts),
+                    "related_episodes": len(turn_context.episodes),
                 }
-            )
+            return JSONResponse(result)
         except Exception as e:
             logger.error("Chat error: %s", e)
             return JSONResponse({"error": str(e)}, status_code=500)
