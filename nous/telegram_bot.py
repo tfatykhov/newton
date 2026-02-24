@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Any
 
 import httpx
@@ -30,6 +31,86 @@ TG_API = "https://api.telegram.org/bot{token}/{method}"
 
 # Max Telegram message length
 TG_MAX_LEN = 4096
+
+
+class StreamingMessage:
+    """Manages progressive message editing for Telegram streaming."""
+
+    def __init__(self, bot: NousTelegramBot, chat_id: int):
+        self._bot = bot
+        self.chat_id = chat_id
+        self.message_id: int | None = None
+        self.text = ""
+        self._last_edit = 0.0
+        self._min_interval = 1.2  # N6: ~20 edits/msg limit
+        self._pending = False
+
+    async def update(self, new_text: str) -> None:
+        """Update message text. Creates on first call, edits after."""
+        self.text = new_text
+        now = time.time()
+        if now - self._last_edit < self._min_interval:
+            self._pending = True
+            return
+        await self._send_or_edit()
+
+    async def append_tool_indicator(self, tool_name: str) -> None:
+        """Add tool usage indicator."""
+        indicators = {
+            "web_search": "\U0001f50d Searching...",
+            "web_fetch": "\U0001f310 Fetching...",
+            "recall_deep": "\U0001f9e0 Remembering...",
+            "record_decision": "\U0001f4dd Recording...",
+            "learn_fact": "\U0001f4a1 Learning...",
+            "bash": "\u2699\ufe0f Running...",
+            "read_file": "\U0001f4c4 Reading...",
+            "write_file": "\u270f\ufe0f Writing...",
+        }
+        indicator = indicators.get(tool_name, f"\U0001f527 {tool_name}...")
+        self.text += f"\n\n{indicator}"
+        await self._send_or_edit()
+
+    async def finalize(self) -> None:
+        """Send final version of message."""
+        if self._pending or self.message_id is None:
+            await self._send_or_edit()
+
+    async def _send_or_edit(self) -> None:
+        if not self.text.strip():
+            return
+
+        display_text = self.text
+
+        # N7: Handle 4096 char overflow
+        if len(display_text) > 4000 and self.message_id is not None:
+            overflow = display_text[4000:]
+            truncated = display_text[:4000] + "\n\n(continued...)"
+            await self._bot._tg("editMessageText", params={
+                "chat_id": self.chat_id,
+                "message_id": self.message_id,
+                "text": truncated,
+            })
+            result = await self._bot._send(self.chat_id, overflow)
+            if isinstance(result, dict) and "message_id" in result:
+                self.message_id = result["message_id"]
+            self.text = overflow
+            self._last_edit = time.time()
+            self._pending = False
+            return
+
+        if self.message_id is None:
+            result = await self._bot._send(self.chat_id, display_text)
+            if isinstance(result, dict) and "message_id" in result:
+                self.message_id = result["message_id"]
+        else:
+            # No parse_mode during streaming (review B3: partial markdown breaks)
+            await self._bot._tg("editMessageText", params={
+                "chat_id": self.chat_id,
+                "message_id": self.message_id,
+                "text": display_text,
+            })
+        self._last_edit = time.time()
+        self._pending = False
 
 
 class NousTelegramBot:
@@ -104,8 +185,8 @@ class NousTelegramBot:
             await self._chat(chat_id, "Show me your current status and available tools.", debug=True)
             return
 
-        # Forward to Nous
-        await self._chat(chat_id, text)
+        # Forward to Nous (streaming)
+        await self._chat_streaming(chat_id, text)
 
     async def _chat(self, chat_id: int, text: str, debug: bool = False) -> None:
         """Send message to Nous API and relay response to Telegram."""
@@ -186,6 +267,53 @@ class NousTelegramBot:
         except Exception as e:
             logger.error("Chat error: %s", e)
             await self._send(chat_id, f"❌ Error: {e}")
+
+    async def _chat_streaming(self, chat_id: int, text: str) -> None:
+        """Send message to Nous streaming API and progressively edit Telegram message."""
+        from uuid import uuid4
+
+        await self._tg("sendChatAction", params={"chat_id": chat_id, "action": "typing"})
+
+        # P1 fix: generate session_id upfront so client and server use same ID
+        session_id = self._sessions.setdefault(chat_id, str(uuid4()))
+        payload: dict[str, Any] = {"message": text, "session_id": session_id}
+
+        streamer = StreamingMessage(self, chat_id)
+
+        try:
+            async with self._http.stream(
+                "POST",
+                f"{self.nous_url}/chat/stream",
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    error_body = await response.aread()
+                    await self._send(chat_id, f"\u274c Error: {error_body.decode()[:200]}")
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    event = json.loads(line[6:])
+
+                    if event.get("type") == "text_delta":
+                        streamer.text += event.get("text", "")
+                        await streamer.update(streamer.text)
+                    elif event.get("type") == "tool_start":
+                        await streamer.append_tool_indicator(event.get("tool_name", ""))
+                    elif event.get("type") == "error":
+                        await self._send(chat_id, f"\u274c {event.get('text', 'Unknown error')}")
+                        return
+                    elif event.get("type") == "done":
+                        break
+
+        except httpx.TimeoutException:
+            await self._send(chat_id, "\u23f1 Request timed out.")
+        except Exception as e:
+            logger.error("Streaming chat error: %s", e)
+            await self._send(chat_id, f"\u274c Error: {e}")
+        finally:
+            await streamer.finalize()
 
     async def _send(self, chat_id: int, text: str, parse_mode: str | None = None) -> dict:
         """Send a message to Telegram."""
