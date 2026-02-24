@@ -75,8 +75,7 @@ class StreamingMessage:
 
     async def append_text(self, text: str) -> None:
         """Append text delta to the base text and update display."""
-        self._base_text += text
-        await self.update(self._base_text)
+        await self.update(self._base_text + text)
 
     async def update(self, new_text: str) -> None:
         """Update message text. Creates on first call, edits after."""
@@ -122,8 +121,7 @@ class StreamingMessage:
         if self._usage:
             self.text += f"\n\n{format_usage_footer(self._usage)}"
 
-        if self._pending or self.message_id is None:
-            await self._send_or_edit()
+        await self._send_or_edit()
 
     async def _send_or_edit(self) -> None:
         if not self.text.strip():
