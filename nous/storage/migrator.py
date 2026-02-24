@@ -61,9 +61,14 @@ async def run_migrations(engine: AsyncEngine) -> list[str]:
             logger.info("Applying migration %s ...", path.name)
             # asyncpg doesn't support multiple statements in one execute(),
             # so split on semicolons and run each statement individually.
-            for stmt in sql.split(";"):
-                stmt = stmt.strip()
-                if not stmt or stmt.startswith("--"):
+            for raw_stmt in sql.split(";"):
+                # Strip SQL comments (-- ...) before checking if empty
+                lines = [
+                    ln for ln in raw_stmt.splitlines()
+                    if ln.strip() and not ln.strip().startswith("--")
+                ]
+                stmt = "\n".join(lines).strip()
+                if not stmt:
                     continue
                 await conn.execute(text(stmt))
             await conn.execute(
