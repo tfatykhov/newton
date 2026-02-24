@@ -18,15 +18,20 @@
 | F007 | [Metrics & Growth](F007-metrics-growth.md) | Planned | 5-level measurement framework, weekly growth reports, automatic tracking |
 | F008 | [Memory Lifecycle](F008-memory-lifecycle.md) | Planned | Auto lifecycle for all memory types — confirm, trim, archive, escalate, retire, **generalize** |
 
+### P1: Capabilities
+| Feature | Name | Status | Description |
+|---------|------|--------|-------------|
+| F009 | [Async Subtasks](F009-async-subtasks.md) | Planned | Background task queue — parallel execution, non-blocking chat, Postgres-backed workers |
+
 ### v0.2.0 Preview (Future)
 | Feature | Name | Description |
 |---------|------|-------------|
-| F009 | K-Line Learning | Auto-create/refine procedures from repeated patterns |
-| F010 | Frame Splitting | Parallel cognitive frames via sub-agents |
-| F011 | Model Router | LLM portability via proxy layer |
-| F012 | Growth Engine | Administrative self-improvement (Papert's Principle) |
-| F013 | Multi-Agent | Nous agents sharing knowledge |
-| F014 | Dashboard | Visual growth tracking and cognitive state |
+| F010 | K-Line Learning | Auto-create/refine procedures from repeated patterns |
+| F011 | Frame Splitting | Parallel cognitive frames via sub-agents |
+| F012 | Model Router | LLM portability via proxy layer |
+| F013 | Growth Engine | Administrative self-improvement (Papert's Principle) |
+| F014 | Multi-Agent | Nous agents sharing knowledge |
+| F015 | Dashboard | Visual growth tracking and cognitive state |
 
 ## Research Notes
 
