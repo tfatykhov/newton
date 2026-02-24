@@ -32,12 +32,12 @@ _DECISION_FRAMES = frozenset({"decision", "task", "debug"})
 
 # Frame-gated tool access (D5)
 FRAME_TOOLS: dict[str, list[str]] = {
-    "conversation": ["record_decision", "learn_fact", "recall_deep", "create_censor", "bash", "read_file", "write_file"],
-    "question": ["recall_deep", "bash", "read_file", "write_file", "record_decision", "learn_fact", "create_censor"],
-    "decision": ["record_decision", "recall_deep", "create_censor", "bash", "read_file"],
-    "creative": ["learn_fact", "recall_deep", "write_file"],
+    "conversation": ["record_decision", "learn_fact", "recall_deep", "create_censor", "bash", "read_file", "write_file", "web_search", "web_fetch"],
+    "question": ["recall_deep", "bash", "read_file", "write_file", "record_decision", "learn_fact", "create_censor", "web_search", "web_fetch"],
+    "decision": ["record_decision", "recall_deep", "create_censor", "bash", "read_file", "web_search", "web_fetch"],
+    "creative": ["learn_fact", "recall_deep", "write_file", "web_search"],
     "task": ["*"],  # All tools
-    "debug": ["record_decision", "recall_deep", "bash", "read_file", "learn_fact"],
+    "debug": ["record_decision", "recall_deep", "bash", "read_file", "learn_fact", "web_search", "web_fetch"],
 }
 
 # Anthropic API version header (P0-1)
@@ -504,7 +504,8 @@ class AgentRunner:
                 "You are in a DECISION frame. You MUST call `record_decision` "
                 "to record your decision before responding. Include your reasoning, "
                 "confidence level, and category. Use `recall_deep` to search "
-                "for relevant past decisions."
+                "for relevant past decisions. Use `web_search` and `web_fetch` "
+                "to research options before deciding."
             )
         elif frame_id == "task":
             return (
@@ -513,7 +514,8 @@ class AgentRunner:
                 "call `record_decision` to record them. Use `recall_deep` to search "
                 "for relevant past decisions and knowledge. Use `learn_fact` to store "
                 "any new facts discovered. You can also use `bash`, `read_file`, and "
-                "`write_file` for system operations."
+                "`write_file` for system operations. Use `web_search` and `web_fetch` "
+                "for research."
             )
         elif frame_id == "debug":
             return (
@@ -521,20 +523,29 @@ class AgentRunner:
                 "You are in a DEBUG frame. Use `recall_deep` to search for relevant "
                 "past decisions and procedures. Record your debugging decisions with "
                 "`record_decision`. Store any root cause findings with `learn_fact`. "
-                "Use `bash` and `read_file` for investigation."
+                "Use `bash` and `read_file` for investigation. Use `web_search` and "
+                "`web_fetch` to look up documentation or error messages."
             )
         elif frame_id == "question":
             return (
                 "## Tool Instructions\n\n"
                 "You are in a QUESTION frame. Use `recall_deep` to search memory "
-                "for relevant knowledge before answering."
+                "for relevant knowledge before answering. Use `web_search` and "
+                "`web_fetch` for questions about current events or topics not in memory."
             )
         elif frame_id == "creative":
             return (
                 "## Tool Instructions\n\n"
                 "You are in a CREATIVE frame. Use `recall_deep` to find relevant "
                 "knowledge. Use `learn_fact` to store creative insights. "
-                "Use `write_file` to save creative output."
+                "Use `write_file` to save creative output. Use `web_search` "
+                "for inspiration and reference material."
+            )
+        elif frame_id == "conversation":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a CONVERSATION frame. Use `web_search` and `web_fetch` "
+                "to find current information when needed."
             )
 
         return ""
