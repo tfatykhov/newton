@@ -2,12 +2,13 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install psql client, curl, and Node.js (required by Claude Agent SDK's bundled CLI)
+# Install psql client, curl, Node.js, and Claude Code CLI (required by Claude Agent SDK)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client curl gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g @anthropic-ai/claude-code
 
 # Create SDK workspace directory
 RUN mkdir -p /tmp/nous-workspace
