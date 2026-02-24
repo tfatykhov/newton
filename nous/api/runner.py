@@ -114,11 +114,26 @@ class AgentRunner:
             "content-type": "application/json",
         }
 
-        # Auth header: Bearer token takes precedence over x-api-key (D1)
-        if settings.anthropic_auth_token:
-            headers["authorization"] = f"Bearer {settings.anthropic_auth_token}"
-        elif settings.anthropic_api_key:
-            headers["x-api-key"] = settings.anthropic_api_key
+        # Auth header selection (D1 + OAT detection)
+        # OAT tokens (sk-ant-oat*) from `claude setup-token` require Bearer auth
+        # plus special beta headers. Regular API keys use x-api-key.
+        api_key = settings.anthropic_api_key or ""
+        auth_token = settings.anthropic_auth_token or ""
+
+        if auth_token:
+            # Explicit auth token always uses Bearer
+            headers["authorization"] = f"Bearer {auth_token}"
+            if "sk-ant-oat" in auth_token:
+                headers["anthropic-beta"] = "oauth-2025-04-20"
+                headers["anthropic-dangerous-direct-browser-access"] = "true"
+        elif api_key:
+            if "sk-ant-oat" in api_key:
+                # OAT token passed as API key - use Bearer + required beta headers
+                headers["authorization"] = f"Bearer {api_key}"
+                headers["anthropic-beta"] = "oauth-2025-04-20"
+                headers["anthropic-dangerous-direct-browser-access"] = "true"
+            else:
+                headers["x-api-key"] = api_key
         else:
             logger.warning(
                 "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set -- "
@@ -144,7 +159,8 @@ class AgentRunner:
             limits=limits,
         )
 
-        auth_type = "Bearer token" if settings.anthropic_auth_token else "API key"
+        is_oat = "sk-ant-oat" in (auth_token or api_key)
+        auth_type = "OAT/subscription" if is_oat else ("Bearer token" if auth_token else "API key")
         logger.info("httpx client initialized (auth: %s)", auth_type)
 
     async def close(self) -> None:
