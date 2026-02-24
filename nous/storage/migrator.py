@@ -59,7 +59,13 @@ async def run_migrations(engine: AsyncEngine) -> list[str]:
             checksum = hashlib.sha256(sql.encode()).hexdigest()
 
             logger.info("Applying migration %s ...", path.name)
-            await conn.execute(text(sql))
+            # asyncpg doesn't support multiple statements in one execute(),
+            # so split on semicolons and run each statement individually.
+            for stmt in sql.split(";"):
+                stmt = stmt.strip()
+                if not stmt or stmt.startswith("--"):
+                    continue
+                await conn.execute(text(stmt))
             await conn.execute(
                 text(
                     "INSERT INTO nous_system.schema_migrations (version, name, checksum) "
