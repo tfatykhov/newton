@@ -60,11 +60,13 @@ graph TB
 | `nous/handlers/__init__.py` | **NEW** — Package init | ~5 |
 | `nous/handlers/episode_summarizer.py` | **NEW** — F010.1 Episode summary on session_ended | ~100 |
 | `nous/handlers/fact_extractor.py` | **NEW** — F010.4 Fact extraction after episode summary | ~100 |
+| `nous/handlers/session_monitor.py` | **NEW** — Session timeout detection + sleep trigger | ~80 |
+| `nous/handlers/sleep_handler.py` | **NEW** — Compaction, reflection, pruning during idle | ~150 |
 | `nous/cognitive/layer.py` | Wire bus into pre_turn/post_turn/end_session | ~30 |
-| `nous/main.py` | Create bus, register handlers, start/stop lifecycle | ~30 |
-| `nous/config.py` | Add `event_bus_enabled`, `episode_summary_enabled`, `fact_extraction_enabled` | ~5 |
-| `tests/test_event_bus.py` | **NEW** — Bus + handler tests | ~250 |
-| **Total** | | ~640 |
+| `nous/main.py` | Create bus, register handlers, start/stop lifecycle | ~40 |
+| `nous/config.py` | Add event bus + handler config with env vars | ~15 |
+| `tests/test_event_bus.py` | **NEW** — Bus + handler tests | ~300 |
+| **Total** | | ~940 |
 
 ## Phase A: EventBus Core (~120 lines)
 
@@ -666,6 +668,8 @@ async def update_episode_summary(self, episode_id: UUID, summary: dict, session=
 from nous.events import EventBus, Event
 from nous.handlers.episode_summarizer import EpisodeSummarizer
 from nous.handlers.fact_extractor import FactExtractor
+from nous.handlers.session_monitor import SessionTimeoutMonitor
+from nous.handlers.sleep_handler import SleepHandler
 
 # Create bus
 bus = EventBus()
@@ -682,13 +686,22 @@ if settings.episode_summary_enabled:
 if settings.fact_extraction_enabled:
     FactExtractor(heart, settings, bus, handler_http)
 
+# Session timeout monitor (always active when bus is enabled)
+session_monitor = SessionTimeoutMonitor(bus, settings)
+
+# Sleep handler (reflection, compaction, pruning)
+if settings.sleep_enabled:
+    SleepHandler(brain, heart, settings, bus, handler_http)
+
 # Pass bus to Cognitive Layer
 cognitive = CognitiveLayer(brain, heart, settings, bus=bus)
 
-# Start bus
+# Start bus + monitor
 await bus.start()
+await session_monitor.start()
 
 # In shutdown_components()
+await session_monitor.stop()
 await bus.stop()
 if handler_http:
     await handler_http.aclose()
@@ -701,10 +714,19 @@ if handler_http:
 event_bus_enabled: bool = True
 episode_summary_enabled: bool = True
 fact_extraction_enabled: bool = True
+sleep_enabled: bool = True
 background_model: str = Field("claude-sonnet-4-5-20250514", validation_alias="NOUS_BACKGROUND_MODEL")
+session_idle_timeout: int = Field(1800, validation_alias="NOUS_SESSION_TIMEOUT")  # 30 min → session_ended
+sleep_timeout: int = Field(7200, validation_alias="NOUS_SLEEP_TIMEOUT")  # 2h → sleep_started
+sleep_check_interval: int = 60  # seconds between timeout checks
 ```
 
-The `background_model` is used by all handlers that make LLM calls (Episode Summarizer, Fact Extractor). Configurable via `NOUS_BACKGROUND_MODEL` env var. Defaults to Sonnet for cost efficiency, but can be set to any model (e.g., `claude-haiku-3-5-20241022` for cheaper, or `claude-opus-4-6` for higher quality).
+**Env vars:**
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `NOUS_BACKGROUND_MODEL` | `claude-sonnet-4-5-20250514` | Model for summary/extraction/reflection LLM calls |
+| `NOUS_SESSION_TIMEOUT` | `1800` (30 min) | Idle seconds before session_ended fires |
+| `NOUS_SLEEP_TIMEOUT` | `7200` (2h) | Idle seconds before sleep mode starts |
 
 ## Phase H: Transcript Capture
 
@@ -804,7 +826,454 @@ await self._chat_streaming(
 )
 ```
 
-## Phase J: Tests (~250 lines)
+## Phase J: Session Timeout Monitor (~80 lines)
+
+### J1: Timeout Detection
+
+**File: `nous/handlers/session_monitor.py`**
+
+```python
+"""Session Timeout Monitor — detects idle sessions and triggers lifecycle events.
+
+Tracks last activity per session. Emits:
+- session_ended: after NOUS_SESSION_TIMEOUT seconds idle (default 30 min)
+- sleep_started: after NOUS_SLEEP_TIMEOUT seconds of global inactivity (default 2h)
+
+This solves the problem that most sessions never explicitly end —
+users just stop talking. Without this, episode summaries, fact extraction,
+and reflection never trigger.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Any
+
+from nous.config import Settings
+from nous.events import Event, EventBus
+
+logger = logging.getLogger(__name__)
+
+
+class SessionTimeoutMonitor:
+    """Monitors session activity and emits timeout events.
+
+    Runs a periodic check (every sleep_check_interval seconds) that:
+    1. Finds sessions idle > session_idle_timeout → emits session_ended
+    2. If ALL sessions idle > sleep_timeout → emits sleep_started
+
+    The monitor registers itself on turn_completed to track activity.
+    """
+
+    def __init__(self, bus: EventBus, settings: Settings):
+        self._bus = bus
+        self._settings = settings
+        self._last_activity: dict[str, float] = {}  # session_id → monotonic time
+        self._last_agent: dict[str, str] = {}  # session_id → agent_id
+        self._global_last_activity: float = time.monotonic()
+        self._sleep_emitted: bool = False
+        self._task: asyncio.Task | None = None
+
+        bus.on("turn_completed", self.on_activity)
+        bus.on("message_received", self.on_activity)
+
+    async def on_activity(self, event: Event) -> None:
+        """Track session activity."""
+        now = time.monotonic()
+        if event.session_id:
+            self._last_activity[event.session_id] = now
+            if event.agent_id:
+                self._last_agent[event.session_id] = event.agent_id
+        self._global_last_activity = now
+        self._sleep_emitted = False  # Reset sleep flag on any activity
+
+    async def start(self) -> None:
+        """Start the periodic timeout checker."""
+        self._task = asyncio.create_task(self._check_loop(), name="session-monitor")
+        logger.info("Session timeout monitor started (idle=%ds, sleep=%ds)",
+                     self._settings.session_idle_timeout, self._settings.sleep_timeout)
+
+    async def stop(self) -> None:
+        """Stop the monitor."""
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
+    async def _check_loop(self) -> None:
+        """Periodic check for idle sessions."""
+        while True:
+            try:
+                await asyncio.sleep(self._settings.sleep_check_interval)
+                await self._check_timeouts()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Session monitor check failed")
+
+    async def _check_timeouts(self) -> None:
+        """Check all tracked sessions for timeouts."""
+        now = time.monotonic()
+
+        # 1. Check individual session timeouts → session_ended
+        expired = []
+        for session_id, last in list(self._last_activity.items()):
+            idle_seconds = now - last
+            if idle_seconds > self._settings.session_idle_timeout:
+                agent_id = self._last_agent.get(session_id, "unknown")
+                logger.info("Session %s idle for %ds, emitting session_ended",
+                           session_id, int(idle_seconds))
+                await self._bus.emit(Event(
+                    type="session_ended",
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    data={"reason": "idle_timeout", "idle_seconds": int(idle_seconds)},
+                ))
+                expired.append(session_id)
+
+        for sid in expired:
+            self._last_activity.pop(sid, None)
+            self._last_agent.pop(sid, None)
+
+        # 2. Check global inactivity → sleep_started
+        global_idle = now - self._global_last_activity
+        if (
+            global_idle > self._settings.sleep_timeout
+            and not self._sleep_emitted
+            and not self._last_activity  # No active sessions remaining
+        ):
+            logger.info("Global idle for %ds, emitting sleep_started", int(global_idle))
+            await self._bus.emit(Event(
+                type="sleep_started",
+                agent_id="system",
+                data={"idle_seconds": int(global_idle)},
+            ))
+            self._sleep_emitted = True
+```
+
+## Phase K: Sleep Handler — Reflection & Compaction (~150 lines)
+
+### K1: Sleep Handler
+
+**File: `nous/handlers/sleep_handler.py`**
+
+```python
+"""Sleep Handler — runs reflection, compaction, and pruning during idle periods.
+
+Listens to: sleep_started
+Emits: sleep_completed
+
+Mirrors how biological brains consolidate during sleep:
+1. Compress — old episodes → compressed summaries
+2. Reflect — cross-session pattern recognition
+3. Generalize — similar facts → generalized facts
+4. Review — check pending decision outcomes
+5. Prune — retire low-activation censors, stale working memory
+
+Phases 1-3 use LLM calls (background_model). Phases 4-5 are free (DB only).
+Sleep is interruptible — if a new message arrives, in-progress work completes
+but remaining phases are skipped.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import UTC, datetime, timedelta
+from typing import Any
+from uuid import UUID
+
+import httpx
+
+from nous.brain.brain import Brain
+from nous.config import Settings
+from nous.events import Event, EventBus
+from nous.heart.heart import Heart
+
+logger = logging.getLogger(__name__)
+
+_REFLECTION_PROMPT = """You are an AI agent reviewing your recent activity. Analyze the following
+episode summaries from the past 24 hours and identify:
+
+1. Patterns — recurring topics, user needs, or behaviors
+2. Lessons — what worked well, what didn't
+3. Connections — links between seemingly unrelated conversations
+4. Gaps — knowledge you needed but didn't have
+
+Episodes:
+{episodes}
+
+Return ONLY valid JSON:
+{{
+  "patterns": ["<pattern 1>", "<pattern 2>"],
+  "lessons": ["<lesson 1>", "<lesson 2>"],
+  "connections": ["<connection 1>"],
+  "gaps": ["<gap 1>"],
+  "summary": "<2-3 sentence reflection on the day>"
+}}"""
+
+_GENERALIZE_PROMPT = """These facts are about the same topic. Create one generalized fact
+that captures the essential knowledge from all of them.
+
+Facts:
+{facts}
+
+Return ONLY valid JSON:
+{{
+  "subject": "<who/what>",
+  "content": "<generalized fact>",
+  "confidence": <0.0-1.0>
+}}"""
+
+
+class SleepHandler:
+    """Runs reflection and maintenance during idle periods.
+
+    Each phase checks self._interrupted before proceeding.
+    A new message_received event sets _interrupted = True.
+    """
+
+    def __init__(
+        self,
+        brain: Brain,
+        heart: Heart,
+        settings: Settings,
+        bus: EventBus,
+        http_client: httpx.AsyncClient | None = None,
+    ):
+        self._brain = brain
+        self._heart = heart
+        self._settings = settings
+        self._bus = bus
+        self._http = http_client
+        self._interrupted = False
+        self._sleeping = False
+
+        bus.on("sleep_started", self.handle)
+        bus.on("message_received", self._on_wake)
+
+    async def _on_wake(self, event: Event) -> None:
+        """Interrupt sleep on new activity."""
+        if self._sleeping:
+            logger.info("Sleep interrupted by new message")
+            self._interrupted = True
+
+    async def handle(self, event: Event) -> None:
+        """Run sleep phases in priority order."""
+        self._sleeping = True
+        self._interrupted = False
+        phases_completed = []
+
+        try:
+            logger.info("Sleep mode started — beginning consolidation")
+
+            # Phase 4 & 5 first (free, no LLM)
+            if not self._interrupted:
+                await self._phase_review_decisions()
+                phases_completed.append("review")
+
+            if not self._interrupted:
+                await self._phase_prune()
+                phases_completed.append("prune")
+
+            # Phase 1: Compress old episodes (LLM)
+            if not self._interrupted:
+                await self._phase_compress()
+                phases_completed.append("compress")
+
+            # Phase 2: Reflect on recent activity (LLM)
+            if not self._interrupted:
+                await self._phase_reflect()
+                phases_completed.append("reflect")
+
+            # Phase 3: Generalize similar facts (LLM)
+            if not self._interrupted:
+                await self._phase_generalize()
+                phases_completed.append("generalize")
+
+            await self._bus.emit(Event(
+                type="sleep_completed",
+                agent_id=event.agent_id,
+                data={
+                    "phases_completed": phases_completed,
+                    "interrupted": self._interrupted,
+                },
+            ))
+            logger.info("Sleep completed: %s (interrupted=%s)", phases_completed, self._interrupted)
+
+        except Exception:
+            logger.exception("Sleep handler error")
+        finally:
+            self._sleeping = False
+
+    async def _phase_review_decisions(self) -> None:
+        """Phase 4: Check pending decisions for observable outcomes. Free."""
+        try:
+            # Get recent unreviewed decisions
+            # Brain.search() with status=pending, created in last 7 days
+            # For each, check if related events indicate success/failure
+            # This is a stub — full implementation depends on Brain.list_pending()
+            logger.debug("Sleep phase: decision review (stub)")
+        except Exception:
+            logger.warning("Decision review phase failed")
+
+    async def _phase_prune(self) -> None:
+        """Phase 5: Retire stale censors, clean working memory. Free."""
+        try:
+            # Retire censors with 0 activations in last 30 days
+            # Clear working memory entries older than 7 days
+            # This is a stub — full implementation depends on Heart.prune()
+            logger.debug("Sleep phase: prune (stub)")
+        except Exception:
+            logger.warning("Prune phase failed")
+
+    async def _phase_compress(self) -> None:
+        """Phase 1: Compress old episodes (>7 days) without summaries."""
+        if not self._http:
+            return
+        try:
+            # Find episodes older than 7 days without structured_summary
+            # Generate summaries for up to 5 per sleep cycle
+            # Uses same EpisodeSummarizer logic but for old episodes
+            logger.debug("Sleep phase: compress old episodes (stub)")
+        except Exception:
+            logger.warning("Compress phase failed")
+
+    async def _phase_reflect(self) -> None:
+        """Phase 2: Cross-session reflection on recent activity."""
+        if not self._http:
+            return
+        try:
+            # Gather episode summaries from last 24h
+            recent = await self._heart.search_episodes("", limit=10)
+            if not recent or len(recent) < 2:
+                logger.debug("Not enough recent episodes for reflection")
+                return
+
+            episodes_text = "\n\n".join(
+                f"- {ep.summary[:200]}" for ep in recent if ep.summary
+            )
+            if not episodes_text:
+                return
+
+            prompt = _REFLECTION_PROMPT.format(episodes=episodes_text)
+
+            headers = self._build_auth_headers()
+            response = await self._http.post(
+                "https://api.anthropic.com/v1/messages",
+                json={
+                    "model": self._settings.background_model,
+                    "max_tokens": 500,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                headers=headers,
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                return
+
+            data = response.json()
+            text = data.get("content", [{}])[0].get("text", "")
+            reflection = json.loads(text)
+
+            # Store reflection as a special episode
+            from nous.heart.schemas import FactInput
+            if reflection.get("summary"):
+                await self._heart.learn(FactInput(
+                    subject="daily_reflection",
+                    content=reflection["summary"],
+                    source="sleep_reflection",
+                    confidence=0.8,
+                ))
+
+            # Store lessons as individual facts
+            for lesson in reflection.get("lessons", [])[:3]:
+                await self._heart.learn(FactInput(
+                    subject="lesson_learned",
+                    content=lesson,
+                    source="sleep_reflection",
+                    confidence=0.7,
+                ))
+
+            logger.info("Reflection complete: %d patterns, %d lessons",
+                       len(reflection.get("patterns", [])),
+                       len(reflection.get("lessons", [])))
+
+        except (json.JSONDecodeError, Exception):
+            logger.warning("Reflection phase failed")
+
+    async def _phase_generalize(self) -> None:
+        """Phase 3: Merge similar facts into generalized facts."""
+        if not self._http:
+            return
+        try:
+            # Find fact clusters (same subject, >5 facts)
+            # For each cluster, generate a generalized fact
+            # Supersede originals with the generalized version
+            # Stub — needs Heart.find_fact_clusters()
+            logger.debug("Sleep phase: generalize facts (stub)")
+        except Exception:
+            logger.warning("Generalize phase failed")
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        """Build Anthropic auth headers (same pattern as other handlers)."""
+        headers: dict[str, str] = {"anthropic-version": "2023-06-01"}
+        api_key = self._settings.anthropic_auth_token or self._settings.anthropic_api_key
+        if api_key and "sk-ant-oat" in api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["anthropic-beta"] = "oauth-2025-04-20"
+            headers["anthropic-dangerous-direct-browser-access"] = "true"
+        else:
+            headers["x-api-key"] = api_key or ""
+        return headers
+```
+
+### K2: Event Flow
+
+```mermaid
+graph TB
+    TC[turn_completed] -->|tracks activity| SM[SessionTimeoutMonitor]
+    MR[message_received] -->|tracks activity| SM
+
+    SM -->|30 min idle| SE[session_ended]
+    SM -->|2h global idle| SS[sleep_started]
+
+    SE --> ES[EpisodeSummarizer]
+    ES -->|emits| EP[episode_summarized]
+    EP --> FE[FactExtractor]
+
+    SS --> SH[SleepHandler]
+    SH -->|Phase 4| RD[Review Decisions]
+    SH -->|Phase 5| PR[Prune Censors/WM]
+    SH -->|Phase 1| CO[Compress Old Episodes]
+    SH -->|Phase 2| RF[Reflect Across Sessions]
+    SH -->|Phase 3| GE[Generalize Facts]
+
+    MR -->|interrupts| SH
+
+    SH -->|emits| SC[sleep_completed]
+```
+
+### K3: Interruptibility
+
+Sleep is designed to be interrupted. When a new `message_received` event arrives during sleep:
+
+1. `_on_wake()` sets `self._interrupted = True`
+2. The currently running phase completes (it's an LLM call, 5-30s)
+3. Remaining phases are skipped
+4. `sleep_completed` event reports which phases ran and that it was interrupted
+
+Free phases (review, prune) run first so they always complete. LLM phases run last and are the most likely to be interrupted — which is fine since they're the least urgent.
+
+## Phase L: Tests (~300 lines)
+
+Renamed from Phase J, expanded to cover new handlers.
 
 **File: `tests/test_event_bus.py`**
 
@@ -849,6 +1318,27 @@ class TestUserTagging:
     # 24. Episode created with user_id
     # 25. Episode created with user_display_name
     # 26. Missing user_id defaults to None (backward compat)
+
+class TestSessionTimeoutMonitor:
+    """Session timeout detection."""
+    # 27. Activity tracked on turn_completed
+    # 28. session_ended emitted after idle timeout
+    # 29. Multiple sessions tracked independently
+    # 30. sleep_started emitted after global idle (no active sessions)
+    # 31. sleep_started NOT emitted while sessions still active
+    # 32. Activity resets sleep flag
+    # 33. Expired sessions cleaned from tracking dict
+
+class TestSleepHandler:
+    """Sleep mode — reflection, compaction, pruning."""
+    # 34. All 5 phases run when not interrupted
+    # 35. message_received interrupts sleep
+    # 36. Free phases (review, prune) run before LLM phases
+    # 37. sleep_completed reports which phases ran
+    # 38. sleep_completed reports interrupted=True when interrupted
+    # 39. Reflection generates facts from cross-session patterns
+    # 40. Reflection skipped when <2 recent episodes
+    # 41. LLM failure doesn't crash sleep handler
 ```
 
 ## Design Decisions
@@ -863,6 +1353,11 @@ class TestUserTagging:
 | D6 | Feature flags per handler | Can disable episode summaries or fact extraction independently without stopping the bus. |
 | D7 | Transcript in SessionMetadata | Ephemeral, in-memory. No DB schema change needed. Flows through session_ended event to summarizer. |
 | D8 | Max 5 facts per episode | Prevents over-accumulation from chatty conversations. |
+| D9 | Session timeout triggers session_ended | Most sessions never explicitly end. 30 min idle = conversation is over. Without this, summaries/extraction never fire. |
+| D10 | Sleep mode = biological sleep metaphor | Consolidation during idle, not on fixed schedule. Runs when there's material to process. Quiet days = no sleep work. |
+| D11 | Free phases first, LLM phases last | If sleep is interrupted, at least review + prune completed. LLM phases are less urgent and more expensive. |
+| D12 | Sleep is interruptible | New message cancels remaining phases. Current phase completes (max 30s). User experience > background work. |
+| D13 | `NOUS_SESSION_TIMEOUT` / `NOUS_SLEEP_TIMEOUT` configurable | Different deployments have different idle patterns. Short for dev (5 min / 30 min), longer for prod. |
 
 ## Acceptance Criteria
 
@@ -875,7 +1370,13 @@ class TestUserTagging:
 - [ ] User ID tagged on episodes (F010.5)
 - [ ] Transcript captured in SessionMetadata
 - [ ] Feature flags control handler registration
-- [ ] All 26 tests pass
+- [ ] Sessions auto-end after NOUS_SESSION_TIMEOUT idle seconds
+- [ ] Sleep mode triggers after NOUS_SLEEP_TIMEOUT global idle seconds
+- [ ] Sleep is interruptible — new message cancels remaining phases
+- [ ] Free phases (review, prune) run before LLM phases
+- [ ] Reflection generates cross-session insights as facts
+- [ ] Sleep handler reports phases completed and interruption status
+- [ ] All 41 tests pass
 - [ ] Existing tests unaffected
 
 ## Implementation Order
@@ -888,8 +1389,10 @@ class TestUserTagging:
 6. `nous/heart/episodes.py` — update_summary method
 7. `nous/handlers/episode_summarizer.py` — F010.1
 8. `nous/handlers/fact_extractor.py` — F010.4
-9. `nous/main.py` — wiring
-10. `tests/test_event_bus.py`
+9. `nous/handlers/session_monitor.py` — timeout detection
+10. `nous/handlers/sleep_handler.py` — reflection & compaction
+11. `nous/main.py` — wiring (bus, handlers, monitor lifecycle)
+12. `tests/test_event_bus.py` — 41 test cases
 
 ## Relationship to F010
 
