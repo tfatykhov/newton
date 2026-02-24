@@ -20,6 +20,7 @@ services:
       - NOUS_MCP_ENABLED=${NOUS_MCP_ENABLED:-true}
       - NOUS_MAX_TURNS=${NOUS_MAX_TURNS:-10}
       - NOUS_WORKSPACE_DIR=${NOUS_WORKSPACE_DIR:-/tmp/nous-workspace}
+      - BRAVE_SEARCH_API_KEY=${BRAVE_SEARCH_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy

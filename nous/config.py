@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     api_timeout_read: int = 120  # seconds
     workspace_dir: str = "/tmp/nous-workspace"
 
+    # Web tools
+    brave_search_api_key: str = Field("", validation_alias="BRAVE_SEARCH_API_KEY")
+    web_search_daily_limit: int = 100  # Max web searches per day
+    web_fetch_max_chars: int = 10000  # Default max chars for web_fetch
+
     @property
     def db_url(self) -> str:
         return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"

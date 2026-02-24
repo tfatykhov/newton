@@ -13,6 +13,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Mount
@@ -20,6 +21,7 @@ from starlette.routing import Mount
 from nous.api.builtin_tools import register_builtin_tools
 from nous.api.runner import AgentRunner
 from nous.api.tools import ToolDispatcher, register_nous_tools
+from nous.api.web_tools import register_web_tools
 from nous.brain import Brain
 from nous.brain.embeddings import EmbeddingProvider
 from nous.cognitive import CognitiveLayer
@@ -62,6 +64,13 @@ async def create_components(settings: Settings) -> dict:
     register_nous_tools(dispatcher, brain, heart)
     register_builtin_tools(dispatcher, settings)
 
+    # Web tools httpx client (separate from runner — no API auth headers)
+    web_http = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10, read=30, write=10, pool=10),
+        limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
+    )
+    register_web_tools(dispatcher, settings, web_http)
+
     runner = AgentRunner(cognitive, brain, heart, settings)
     runner.set_dispatcher(dispatcher)
     await runner.start()
@@ -74,12 +83,17 @@ async def create_components(settings: Settings) -> dict:
         "runner": runner,
         "dispatcher": dispatcher,
         "embedding_provider": embedding_provider,
+        "web_http": web_http,
     }
 
 
 async def shutdown_components(components: dict) -> None:
     """Graceful shutdown in reverse order."""
     logger.info("Shutting down Nous...")
+
+    web_http = components.get("web_http")
+    if web_http:
+        await web_http.aclose()
 
     runner = components.get("runner")
     if runner:
@@ -230,6 +244,9 @@ def main() -> None:
             "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set — "
             "/chat endpoints will fail"
         )
+
+    if not settings.brave_search_api_key:
+        logger.warning("BRAVE_SEARCH_API_KEY not set — web_search will be unavailable")
 
     app = build_app(settings)
 
