@@ -1,14 +1,19 @@
-"""Integration tests for nous/api/tools.py tool closures.
+"""Integration tests for nous/api/tools.py -- tool closures and ToolDispatcher.
 
-All tests use real Brain/Heart instances with mock embeddings
+Part 1: Closure tests use real Brain/Heart instances with mock embeddings
 against real Postgres. Tool closures capture Brain/Heart in closure
 context and use auto-sessions (no session= parameter).
+
+Part 2: ToolDispatcher unit tests verify registration, dispatch,
+unknown tool handling, error propagation, tool definitions output,
+and frame-gated tool filtering.
 """
 
 import pytest
 import pytest_asyncio
+from unittest.mock import AsyncMock
 
-from nous.api.tools import create_nous_tools
+from nous.api.tools import create_nous_tools, ToolDispatcher
 from nous.brain.brain import Brain
 from nous.config import Settings
 from nous.heart import Heart
@@ -303,3 +308,137 @@ class TestCreateCensor:
         assert "content" in result
         text = result["content"][0]["text"]
         assert "Validation error" in text or "Error" in text
+
+
+# ---------------------------------------------------------------------------
+# ToolDispatcher unit tests (no DB needed)
+# ---------------------------------------------------------------------------
+
+
+_ECHO_SCHEMA: dict = {
+    "type": "object",
+    "description": "Echo tool for testing",
+    "properties": {
+        "message": {"type": "string", "description": "Message to echo"},
+    },
+    "required": ["message"],
+}
+
+_ADD_SCHEMA: dict = {
+    "type": "object",
+    "description": "Add two numbers for testing",
+    "properties": {
+        "a": {"type": "number"},
+        "b": {"type": "number"},
+    },
+    "required": ["a", "b"],
+}
+
+
+class TestToolDispatcher:
+    """Unit tests for ToolDispatcher registration, dispatch, and filtering."""
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_register_and_dispatch(self):
+        """Register a handler, dispatch a call, verify result text and no error."""
+        dispatcher = ToolDispatcher()
+
+        async def echo_handler(message: str) -> dict:
+            return {"content": [{"type": "text", "text": f"Echo: {message}"}]}
+
+        dispatcher.register("echo", echo_handler, _ECHO_SCHEMA)
+
+        result_text, is_error = await dispatcher.dispatch("echo", {"message": "hello"})
+        assert result_text == "Echo: hello"
+        assert is_error is False
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_unknown_tool(self):
+        """Dispatch unknown tool name -> error tuple with 'Unknown tool' message."""
+        dispatcher = ToolDispatcher()
+
+        result_text, is_error = await dispatcher.dispatch("nonexistent", {})
+        assert is_error is True
+        assert "Unknown tool: nonexistent" in result_text
+
+    @pytest.mark.asyncio
+    async def test_dispatcher_tool_error(self):
+        """Handler raises exception -> error tuple with exception message."""
+        dispatcher = ToolDispatcher()
+
+        async def failing_handler(**kwargs) -> dict:
+            raise ValueError("Something went wrong in the tool")
+
+        dispatcher.register("fail", failing_handler, _ECHO_SCHEMA)
+
+        result_text, is_error = await dispatcher.dispatch("fail", {})
+        assert is_error is True
+        assert "Tool error:" in result_text
+        assert "Something went wrong" in result_text
+
+    def test_dispatcher_tool_definitions(self):
+        """tool_definitions() returns Anthropic API format with name, description, input_schema."""
+        dispatcher = ToolDispatcher()
+
+        async def echo_handler(message: str) -> dict:
+            return {"content": [{"type": "text", "text": message}]}
+
+        async def add_handler(a: float, b: float) -> dict:
+            return {"content": [{"type": "text", "text": str(a + b)}]}
+
+        dispatcher.register("echo", echo_handler, _ECHO_SCHEMA)
+        dispatcher.register("add", add_handler, _ADD_SCHEMA)
+
+        definitions = dispatcher.tool_definitions()
+        assert len(definitions) == 2
+
+        # Each definition should have name, description, input_schema
+        names = {d["name"] for d in definitions}
+        assert names == {"echo", "add"}
+
+        for defn in definitions:
+            assert "name" in defn
+            assert "description" in defn
+            assert "input_schema" in defn
+            assert defn["input_schema"]["type"] == "object"
+
+    def test_dispatcher_available_tools_with_frame(self):
+        """available_tools() filters by FRAME_TOOLS map.
+
+        Register several tools, verify that frame filtering works.
+        The 'question' frame only allows 'recall_deep'.
+        """
+        dispatcher = ToolDispatcher()
+
+        # Register multiple tools (using mock handlers)
+        handler = AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})
+        for name in ["record_decision", "learn_fact", "recall_deep", "create_censor", "bash"]:
+            dispatcher.register(name, handler, {"type": "object", "description": f"{name} tool"})
+
+        # 'question' frame: only recall_deep allowed per FRAME_TOOLS
+        question_tools = dispatcher.available_tools("question")
+        question_names = {t["name"] for t in question_tools}
+        assert question_names == {"recall_deep"}
+
+    def test_dispatcher_available_tools_wildcard_frame(self):
+        """Frame with wildcard '*' returns all registered tools."""
+        dispatcher = ToolDispatcher()
+
+        handler = AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})
+        for name in ["record_decision", "recall_deep", "bash", "read_file", "write_file"]:
+            dispatcher.register(name, handler, {"type": "object", "description": f"{name} tool"})
+
+        # 'task' frame has "*" in FRAME_TOOLS -> all tools
+        task_tools = dispatcher.available_tools("task")
+        task_names = {t["name"] for t in task_tools}
+        assert task_names == {"record_decision", "recall_deep", "bash", "read_file", "write_file"}
+
+    def test_dispatcher_available_tools_unknown_frame(self):
+        """Unknown frame ID returns empty tool list."""
+        dispatcher = ToolDispatcher()
+
+        handler = AsyncMock(return_value={"content": [{"type": "text", "text": "ok"}]})
+        dispatcher.register("recall_deep", handler, {"type": "object", "description": "test"})
+
+        unknown_tools = dispatcher.available_tools("nonexistent_frame")
+        assert unknown_tools == []

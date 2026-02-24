@@ -1,20 +1,20 @@
-"""Agent runner — executes a single conversational turn.
+"""Agent runner -- executes conversational turns via direct Anthropic API.
 
 Wires CognitiveLayer.pre_turn() and post_turn() around
-the Claude Agent SDK query. This is the core execution loop.
-
-Uses claude-agent-sdk with in-process MCP tools so Claude can
-call record_decision, learn_fact, recall_deep, and create_censor
-during a turn.
+direct httpx calls to the Anthropic Messages API.  Manages the
+tool use loop internally (no external SDK).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import os
+import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any
+
+import httpx
 
 from nous.brain.brain import Brain
 from nous.cognitive.layer import CognitiveLayer
@@ -29,6 +29,19 @@ MAX_HISTORY_MESSAGES = 20
 
 # Frame types that should nudge Claude to call record_decision
 _DECISION_FRAMES = frozenset({"decision", "task", "debug"})
+
+# Frame-gated tool access (D5)
+FRAME_TOOLS: dict[str, list[str]] = {
+    "conversation": ["record_decision", "learn_fact", "recall_deep", "create_censor"],
+    "question": ["recall_deep"],
+    "decision": ["record_decision", "recall_deep", "create_censor", "bash", "read_file"],
+    "creative": ["learn_fact", "recall_deep", "write_file"],
+    "task": ["*"],  # All tools
+    "debug": ["record_decision", "recall_deep", "bash", "read_file", "learn_fact"],
+}
+
+# Anthropic API version header (P0-1)
+_API_VERSION = "2023-06-01"
 
 
 @dataclass
@@ -48,11 +61,20 @@ class Conversation:
     turn_contexts: list[TurnContext] = field(default_factory=list)
 
 
+@dataclass
+class ApiResponse:
+    """Parsed response from Anthropic Messages API."""
+
+    content: list[dict[str, Any]]  # Raw content blocks from API
+    stop_reason: str  # end_turn, max_tokens, tool_use, stop_sequence
+    usage: dict[str, int] | None = None
+
+
 class AgentRunner:
     """Runs conversational turns with cognitive layer hooks.
 
-    Uses the Claude Agent SDK with in-process MCP tools for
-    tool-augmented LLM conversations.
+    Uses direct httpx calls to the Anthropic Messages API with
+    an internal tool dispatch loop.
     """
 
     REFLECTION_PROMPT = (
@@ -75,33 +97,61 @@ class AgentRunner:
         self._heart = heart
         self._settings = settings
         self._conversations: OrderedDict[str, Conversation] = OrderedDict()
-        self._mcp_server: Any | None = None  # McpSdkServerConfig from tools.py
+        self._http: httpx.AsyncClient | None = None
+        self._dispatcher: Any | None = None  # ToolDispatcher, set via set_dispatcher()
+
+    def set_dispatcher(self, dispatcher: Any) -> None:
+        """Set the tool dispatcher for tool loop execution."""
+        self._dispatcher = dispatcher
 
     async def start(self) -> None:
-        """Initialize the SDK: set auth env vars and create in-process MCP server."""
-        # Set Anthropic auth environment variables for the SDK.
-        # auth_token takes precedence over api_key.
-        if self._settings.anthropic_auth_token:
-            os.environ["ANTHROPIC_AUTH_TOKEN"] = self._settings.anthropic_auth_token
-        elif self._settings.anthropic_api_key:
-            os.environ["ANTHROPIC_API_KEY"] = self._settings.anthropic_api_key
+        """Initialize the httpx client with auth and timeout settings."""
+        settings = self._settings
+
+        # Build default headers
+        headers: dict[str, str] = {
+            "anthropic-version": _API_VERSION,
+            "content-type": "application/json",
+        }
+
+        # Auth header: Bearer token takes precedence over x-api-key (D1)
+        if settings.anthropic_auth_token:
+            headers["authorization"] = f"Bearer {settings.anthropic_auth_token}"
+        elif settings.anthropic_api_key:
+            headers["x-api-key"] = settings.anthropic_api_key
         else:
             logger.warning(
-                "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set — "
-                "SDK queries will fail"
+                "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set -- "
+                "API calls will fail"
             )
 
-        # Create in-process MCP server with Nous tools
-        from nous.api.tools import create_nous_mcp_server
-
-        self._mcp_server = create_nous_mcp_server(self._brain, self._heart)
-        logger.info(
-            "SDK tools registered: record_decision, learn_fact, recall_deep, create_censor"
+        # Create httpx client with timeout and connection limits
+        timeout = httpx.Timeout(
+            connect=settings.api_timeout_connect,
+            read=settings.api_timeout_read,
+            write=10.0,
+            pool=10.0,
+        )
+        limits = httpx.Limits(
+            max_connections=10,
+            max_keepalive_connections=5,
         )
 
+        self._http = httpx.AsyncClient(
+            base_url=settings.api_base_url,
+            headers=headers,
+            timeout=timeout,
+            limits=limits,
+        )
+
+        auth_type = "Bearer token" if settings.anthropic_auth_token else "API key"
+        logger.info("httpx client initialized (auth: %s)", auth_type)
+
     async def close(self) -> None:
-        """Clean up SDK resources."""
-        self._mcp_server = None
+        """Clean up httpx client."""
+        if self._http:
+            await self._http.aclose()
+            self._http = None
 
     async def run_turn(
         self,
@@ -115,15 +165,13 @@ class AgentRunner:
         1. Get or create Conversation for session_id
         2. Call cognitive.pre_turn() -> TurnContext
         3. Append user message to conversation history
-        4. Build full system prompt (cognitive context + frame instructions + history)
-        5. Call Claude via SDK query() with in-process tools
-        6. Extract response text and tool call info from stream
+        4. Build system prompt (cognitive context + frame instructions)
+        5. Run tool loop: call API, dispatch tools, repeat until done
+        6. Extract response text from final API response
         7. Append assistant message to conversation history
         8. Call cognitive.post_turn() with TurnResult
         9. Safety net: check if decision frame but no record_decision called
         10. Return (response_text, turn_context)
-
-        On SDK error: log, create TurnResult with error, still call post_turn.
         """
         _agent_id = agent_id or self._settings.agent_id
         conversation = self._get_or_create_conversation(session_id)
@@ -143,18 +191,20 @@ class AgentRunner:
         # 3. Append user message
         conversation.messages.append(Message(role="user", content=user_message))
 
-        # 4-6. Call LLM via SDK
+        # 4-6. Build system prompt and run tool loop
         response_text = ""
         tool_results: list[ToolResult] = []
         error = None
         try:
-            response_text, tool_results = await self._call_sdk(
-                system_prompt=self._build_system_prompt(turn_context, conversation),
-                user_message=user_message,
+            system_prompt = self._build_system_prompt(turn_context)
+            response_text, tool_results = await self._tool_loop(
+                system_prompt=system_prompt,
+                conversation=conversation,
+                frame_id=turn_context.frame.frame_id,
             )
             conversation.messages.append(Message(role="assistant", content=response_text))
         except Exception as e:
-            logger.error("SDK query error: %s", e)
+            logger.error("API call error: %s", e)
             error = str(e)
             response_text = "I encountered an error processing your request. Please try again."
             conversation.messages.append(Message(role="assistant", content=response_text))
@@ -194,10 +244,14 @@ class AgentRunner:
                     f"Here is a conversation to review:\n\n{history_text}\n\n"
                     f"{self.REFLECTION_PROMPT}"
                 )
-                reflection, _ = await self._call_sdk(
+                # P1-9: Call _call_api directly, no tool loop needed for reflection
+                api_response = await self._call_api(
                     system_prompt="You are reviewing a conversation to extract lessons learned.",
-                    user_message=reflection_prompt,
+                    messages=[{"role": "user", "content": reflection_prompt}],
+                    tools=None,
                 )
+                # Extract text from response
+                reflection = self._extract_text(api_response.content)
             except Exception as e:
                 logger.warning("Failed to generate reflection: %s", e)
 
@@ -207,90 +261,210 @@ class AgentRunner:
         self._conversations.pop(session_id, None)
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # API call
     # ------------------------------------------------------------------
 
-    async def _call_sdk(
+    async def _call_api(
         self,
         system_prompt: str,
-        user_message: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> ApiResponse:
+        """Call Anthropic Messages API with retry for 429/500/529.
+
+        Returns parsed ApiResponse with content blocks and stop_reason.
+        Raises RuntimeError on persistent errors.
+        """
+        if not self._http:
+            raise RuntimeError("httpx client not initialized -- call start() first")
+
+        # Build request payload
+        payload: dict[str, Any] = {
+            "model": self._settings.model,
+            "max_tokens": self._settings.max_tokens,
+            "system": [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            "messages": messages,
+        }
+        if tools:
+            payload["tools"] = tools
+
+        # Simple retry: 1x for 429/500/529
+        last_error: Exception | None = None
+        for attempt in range(2):  # max 2 attempts (initial + 1 retry)
+            try:
+                response = await self._http.post("/v1/messages", json=payload)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    return ApiResponse(
+                        content=data["content"],
+                        stop_reason=data["stop_reason"],
+                        usage=data.get("usage"),
+                    )
+
+                # Parse error body
+                try:
+                    error_data = response.json()
+                    error_type = error_data.get("error", {}).get("type", "unknown")
+                    error_msg = error_data.get("error", {}).get("message", "unknown error")
+                except Exception:
+                    error_type = "http_error"
+                    error_msg = f"HTTP {response.status_code}: {response.text[:500]}"
+
+                # Retry on 429 (rate limit) or 500/529 (server error)
+                if response.status_code in (429, 500, 529) and attempt == 0:
+                    retry_after = float(response.headers.get("retry-after", "1"))
+                    retry_after = min(retry_after, 30.0)  # Cap at 30s
+                    logger.warning(
+                        "API error %d (%s), retrying in %.1fs: %s",
+                        response.status_code,
+                        error_type,
+                        retry_after,
+                        error_msg,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                last_error = RuntimeError(
+                    f"Anthropic API error ({response.status_code}): "
+                    f"{error_type} - {error_msg}"
+                )
+
+            except httpx.TimeoutException as e:
+                last_error = RuntimeError(f"API request timed out: {e}")
+                if attempt == 0:
+                    logger.warning("API timeout, retrying: %s", e)
+                    await asyncio.sleep(1)
+                    continue
+            except httpx.HTTPError as e:
+                last_error = RuntimeError(f"HTTP error: {e}")
+                break  # Don't retry connection errors
+
+        raise last_error or RuntimeError("API call failed with unknown error")
+
+    # ------------------------------------------------------------------
+    # Tool loop
+    # ------------------------------------------------------------------
+
+    async def _tool_loop(
+        self,
+        system_prompt: str,
+        conversation: Conversation,
+        frame_id: str,
     ) -> tuple[str, list[ToolResult]]:
-        """Call Claude via the SDK query() function.
+        """Run the tool use loop until completion or max_turns.
 
         Returns (response_text, tool_results).
-        The SDK handles the tool loop internally — we iterate the stream
-        and collect the final text response and any tool call info.
+
+        The loop:
+        1. Build messages array from conversation
+        2. Call API with system prompt, messages, and available tools
+        3. If stop_reason is not "tool_use", extract text and return
+        4. Otherwise: append assistant response, dispatch tools, append results
+        5. Repeat until done or max_turns
         """
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ResultMessage,
-            TextBlock,
-            ToolResultBlock,
-            ToolUseBlock,
-            query,
-        )
+        if not self._dispatcher:
+            raise RuntimeError("No tool dispatcher set -- call set_dispatcher() first")
 
-        options = ClaudeAgentOptions(
-            system_prompt=system_prompt,
-            model=self._settings.model,
-            max_turns=self._settings.sdk_max_turns,
-            permission_mode=self._settings.sdk_permission_mode,
-        )
+        # Get tools for current frame (D5)
+        tools = self._dispatcher.available_tools(frame_id)
 
-        # Register in-process MCP server if available
-        if self._mcp_server:
-            options.mcp_servers = {"nous": self._mcp_server}
+        # Build initial messages from conversation history
+        # The latest user message is already in conversation.messages
+        messages = self._format_messages(conversation)
 
-        response_text_parts: list[str] = []
-        tool_results: list[ToolResult] = []
-        # Map tool_use_id -> index in tool_results for attaching results
-        _tool_use_index: dict[str, int] = {}
+        all_tool_results: list[ToolResult] = []
+        turns = 0
+        max_turns = self._settings.max_turns
 
-        async for message in query(prompt=user_message, options=options):
-            if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text_parts.append(block.text)
-                    elif isinstance(block, ToolUseBlock):
-                        _tool_use_index[block.id] = len(tool_results)
-                        tool_results.append(
-                            ToolResult(
-                                tool_name=block.name,
-                                arguments=block.input,
-                            )
-                        )
-                    elif isinstance(block, ToolResultBlock):
-                        idx = _tool_use_index.get(block.tool_use_id)
-                        if idx is not None:
-                            content = block.content
-                            if isinstance(content, list):
-                                content = "\n".join(
-                                    item.get("text", "") for item in content if isinstance(item, dict)
-                                )
-                            tool_results[idx].result = content or None
-                            if block.is_error:
-                                tool_results[idx].error = content or "tool error"
-            elif isinstance(message, ResultMessage):
-                if message.is_error:
-                    raise RuntimeError(
-                        f"SDK query failed (session={message.session_id}): "
-                        f"{message.result or 'unknown error'}"
+        while turns < max_turns:
+            api_response = await self._call_api(
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools if tools else None,
+            )
+
+            # If not a tool use, we're done
+            if api_response.stop_reason != "tool_use":
+                response_text = self._extract_text(api_response.content)
+                return response_text, all_tool_results
+
+            # P0-3: Append FULL assistant response (all content blocks)
+            messages.append({
+                "role": "assistant",
+                "content": api_response.content,
+            })
+
+            # P1-2: Dispatch ALL tool_use blocks, collect results in SINGLE user message
+            tool_results_for_message: list[dict[str, Any]] = []
+            for block in api_response.content:
+                if block.get("type") == "tool_use":
+                    tool_name = block["name"]
+                    tool_input = block.get("input", {})
+                    tool_use_id = block["id"]
+
+                    start_time = time.monotonic()
+                    result_text, is_error = await self._dispatcher.dispatch(
+                        tool_name, tool_input
                     )
-                # If ResultMessage has a result text and we got no text blocks,
-                # use it as the response
-                if message.result and not response_text_parts:
-                    response_text_parts.append(message.result)
+                    duration_ms = int((time.monotonic() - start_time) * 1000)
 
-        response_text = "\n".join(response_text_parts) if response_text_parts else ""
-        return response_text, tool_results
+                    tool_results_for_message.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": result_text,
+                        "is_error": is_error,
+                    })
+
+                    # Track for post_turn
+                    all_tool_results.append(ToolResult(
+                        tool_name=tool_name,
+                        arguments=tool_input,
+                        result=result_text if not is_error else None,
+                        error=result_text if is_error else None,
+                        duration_ms=duration_ms,
+                    ))
+
+            # Append all tool results as single user message
+            messages.append({
+                "role": "user",
+                "content": tool_results_for_message,
+            })
+
+            turns += 1
+
+        # Max turns reached -- extract text from last response if any
+        logger.warning("Tool loop reached max_turns=%d", max_turns)
+        # Make one final call without tools to get a text response
+        try:
+            final_response = await self._call_api(
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=None,
+            )
+            return self._extract_text(final_response.content), all_tool_results
+        except Exception:
+            return "I reached the maximum number of tool iterations. Please try again.", all_tool_results
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _build_system_prompt(
         self,
         turn_context: TurnContext,
-        conversation: Conversation,
     ) -> str:
-        """Build the full system prompt: cognitive context + frame instructions + history."""
+        """Build the system prompt: cognitive context + frame instructions.
+
+        P0-2 fix: Does NOT inject conversation history. History flows
+        through messages[] array via _format_messages().
+        """
         parts = [turn_context.system_prompt]
 
         # Add frame-specific tool instructions
@@ -298,21 +472,13 @@ class AgentRunner:
         if frame_instructions:
             parts.append(frame_instructions)
 
-        # Add conversation history as context
-        if conversation.messages:
-            history = self._format_history_text(conversation)
-            if history:
-                parts.append(
-                    f"## Conversation History\n\n{history}\n\n"
-                    "Continue the conversation from here."
-                )
-
         return "\n\n".join(parts)
 
     def _get_frame_instructions(self, turn_context: TurnContext) -> str:
         """Return frame-specific tool use instructions.
 
         Nudges Claude to use appropriate tools based on the active cognitive frame.
+        Only mentions tools available for the frame (synced with FRAME_TOOLS).
         """
         frame_id = turn_context.frame.frame_id
 
@@ -321,7 +487,8 @@ class AgentRunner:
                 "## Tool Instructions\n\n"
                 "You are in a DECISION frame. You MUST call `record_decision` "
                 "to record your decision before responding. Include your reasoning, "
-                "confidence level, and category."
+                "confidence level, and category. Use `recall_deep` to search "
+                "for relevant past decisions."
             )
         elif frame_id == "task":
             return (
@@ -329,14 +496,16 @@ class AgentRunner:
                 "You are in a TASK frame. If you make any decisions during this task, "
                 "call `record_decision` to record them. Use `recall_deep` to search "
                 "for relevant past decisions and knowledge. Use `learn_fact` to store "
-                "any new facts discovered."
+                "any new facts discovered. You can also use `bash`, `read_file`, and "
+                "`write_file` for system operations."
             )
         elif frame_id == "debug":
             return (
                 "## Tool Instructions\n\n"
                 "You are in a DEBUG frame. Use `recall_deep` to search for relevant "
                 "past decisions and procedures. Record your debugging decisions with "
-                "`record_decision`. Store any root cause findings with `learn_fact`."
+                "`record_decision`. Store any root cause findings with `learn_fact`. "
+                "Use `bash` and `read_file` for investigation."
             )
         elif frame_id == "question":
             return (
@@ -344,8 +513,23 @@ class AgentRunner:
                 "You are in a QUESTION frame. Use `recall_deep` to search memory "
                 "for relevant knowledge before answering."
             )
+        elif frame_id == "creative":
+            return (
+                "## Tool Instructions\n\n"
+                "You are in a CREATIVE frame. Use `recall_deep` to find relevant "
+                "knowledge. Use `learn_fact` to store creative insights. "
+                "Use `write_file` to save creative output."
+            )
 
         return ""
+
+    def _extract_text(self, content_blocks: list[dict[str, Any]]) -> str:
+        """Extract text from API response content blocks."""
+        text_parts = []
+        for block in content_blocks:
+            if block.get("type") == "text":
+                text_parts.append(block["text"])
+        return "\n".join(text_parts) if text_parts else ""
 
     def _check_safety_net(
         self,
@@ -381,7 +565,7 @@ class AgentRunner:
         self._conversations[session_id] = conversation
         return conversation
 
-    def _format_messages(self, conversation: Conversation) -> list[dict]:
+    def _format_messages(self, conversation: Conversation) -> list[dict[str, Any]]:
         """Format conversation history for API calls.
 
         Returns list of {"role": ..., "content": ...}.
@@ -391,7 +575,7 @@ class AgentRunner:
         return [{"role": m.role, "content": m.content} for m in recent]
 
     def _format_history_text(self, conversation: Conversation) -> str:
-        """Format conversation history as readable text for system prompt injection."""
+        """Format conversation history as readable text for reflection."""
         recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
         lines = []
         for msg in recent:

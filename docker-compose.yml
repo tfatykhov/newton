@@ -18,10 +18,8 @@ services:
       - NOUS_MODEL=${NOUS_MODEL:-claude-sonnet-4-5-20250514}
       - NOUS_LOG_LEVEL=${NOUS_LOG_LEVEL:-info}
       - NOUS_MCP_ENABLED=${NOUS_MCP_ENABLED:-true}
-      - NOUS_SDK_MAX_TURNS=${NOUS_SDK_MAX_TURNS:-10}
-      - NOUS_SDK_PERMISSION_MODE=${NOUS_SDK_PERMISSION_MODE:-default}
-      - NOUS_SDK_WORKSPACE=${NOUS_SDK_WORKSPACE:-/tmp/nous-workspace}
-      # SDK_ALLOWED_TOOLS uses default from config.py (list type requires JSON format if overridden)
+      - NOUS_MAX_TURNS=${NOUS_MAX_TURNS:-10}
+      - NOUS_WORKSPACE_DIR=${NOUS_WORKSPACE_DIR:-/tmp/nous-workspace}
     depends_on:
       postgres:
         condition: service_healthy

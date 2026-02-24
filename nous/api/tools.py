@@ -1,10 +1,12 @@
-"""In-process tools for Claude Agent SDK integration.
+"""Tool dispatcher and Nous memory tools for direct Anthropic API integration.
 
-Provides 4 tool closures that give Claude direct access to Nous memory organs:
-- record_decision: Write decisions to Brain
-- learn_fact: Store facts in Heart
-- recall_deep: Search all memory types (Heart + Brain)
-- create_censor: Add guardrails to Heart
+Provides:
+- ToolDispatcher: registers tools, dispatches calls, filters by frame
+- 4 tool closures that give Claude direct access to Nous memory organs:
+  - record_decision: Write decisions to Brain
+  - learn_fact: Store facts in Heart
+  - recall_deep: Search all memory types (Heart + Brain)
+  - create_censor: Add guardrails to Heart
 
 Each tool returns MCP-compliant response format and handles errors gracefully.
 """
@@ -12,6 +14,7 @@ Each tool returns MCP-compliant response format and handles errors gracefully.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
@@ -23,10 +26,91 @@ from nous.heart.schemas import CensorInput, FactInput
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# ToolDispatcher
+# ---------------------------------------------------------------------------
+
+
+class ToolDispatcher:
+    """Registers tool handlers and dispatches tool calls from the API.
+
+    Each handler is an async callable that accepts **kwargs and returns
+    an MCP-format response: {"content": [{"type": "text", "text": "..."}]}.
+
+    The dispatcher extracts plain text for the Anthropic API tool_result format.
+    """
+
+    def __init__(self) -> None:
+        self._handlers: dict[str, Callable[..., Any]] = {}
+        self._schemas: dict[str, dict[str, Any]] = {}  # P0-7 fix
+
+    def register(self, name: str, handler: Callable[..., Any], schema: dict[str, Any]) -> None:
+        """Register a tool handler with its JSON schema."""
+        self._handlers[name] = handler
+        self._schemas[name] = schema
+
+    async def dispatch(self, name: str, args: dict[str, Any]) -> tuple[str, bool]:
+        """Dispatch a tool call and return (result_text, is_error).
+
+        P0-6 fix: Uses **kwargs unpacking for closures.
+        P1-1 fix: Extracts text from MCP-format response.
+        """
+        handler = self._handlers.get(name)
+        if not handler:
+            return f"Unknown tool: {name}", True
+        try:
+            result = await handler(**args)  # P0-6: **kwargs unpacking
+            # P1-1: Extract text from MCP-format response
+            return result["content"][0]["text"], False
+        except Exception as e:
+            logger.exception("Tool dispatch error for %s", name)
+            return f"Tool error: {e}", True
+
+    def tool_definitions(self) -> list[dict[str, Any]]:
+        """Return all tool definitions in Anthropic API format."""
+        return [
+            {
+                "name": name,
+                "description": schema.get("description", ""),
+                "input_schema": schema,
+            }
+            for name, schema in self._schemas.items()
+        ]
+
+    def available_tools(self, frame_id: str) -> list[dict[str, Any]]:
+        """Return tool definitions filtered by frame (D5).
+
+        Uses FRAME_TOOLS map from runner module to determine which
+        tools are available for a given frame. Wildcard "*" means all tools.
+        """
+        from nous.api.runner import FRAME_TOOLS
+
+        allowed = FRAME_TOOLS.get(frame_id, [])
+
+        # Wildcard means all tools
+        if "*" in allowed:
+            return self.tool_definitions()
+
+        return [
+            {
+                "name": name,
+                "description": schema.get("description", ""),
+                "input_schema": schema,
+            }
+            for name, schema in self._schemas.items()
+            if name in allowed
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Nous memory tool closures
+# ---------------------------------------------------------------------------
+
+
 def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
     """Create tool closures with Brain and Heart captured in closure context.
 
-    Returns a dict of async callables suitable for SDK MCP server registration.
+    Returns a dict of async callables suitable for ToolDispatcher registration.
     Each closure takes tool parameters, calls Brain/Heart methods, and returns
     MCP-compliant response: {"content": [{"type": "text", "text": "..."}]}.
 
@@ -156,7 +240,7 @@ def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
             warning_msg = ""
             if result.contradiction_warning:
                 warning_msg = (
-                    f"\n⚠️ Potential contradiction detected:\n"
+                    f"\nPotential contradiction detected:\n"
                     f"Existing fact: {result.contradiction_warning.existing_content}\n"
                     f"Similarity: {result.contradiction_warning.similarity:.2f}"
                 )
@@ -318,15 +402,15 @@ def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# SDK MCP server registration
+# Tool schema definitions (Anthropic API format)
 # ---------------------------------------------------------------------------
 
 # JSON Schema definitions for each tool's input parameters.
-# Used by claude-agent-sdk @tool decorator so Claude knows
-# what arguments each tool accepts.
+# Field names match the closure parameter names exactly.
 
 _RECORD_DECISION_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "description": "Record a decision to the Brain (decision intelligence organ)",
     "properties": {
         "description": {"type": "string", "description": "What was decided"},
         "confidence": {
@@ -382,6 +466,7 @@ _RECORD_DECISION_SCHEMA: dict[str, Any] = {
 
 _LEARN_FACT_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "description": "Store a fact in the Heart (memory system)",
     "properties": {
         "content": {"type": "string", "description": "The fact content"},
         "category": {
@@ -411,6 +496,7 @@ _LEARN_FACT_SCHEMA: dict[str, Any] = {
 
 _RECALL_DEEP_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "description": "Search across all memory types in Heart and Brain",
     "properties": {
         "query": {"type": "string", "description": "Search query string"},
         "limit": {
@@ -434,6 +520,7 @@ _RECALL_DEEP_SCHEMA: dict[str, Any] = {
 
 _CREATE_CENSOR_SCHEMA: dict[str, Any] = {
     "type": "object",
+    "description": "Create a guardrail censor in the Heart",
     "properties": {
         "trigger_pattern": {
             "type": "string",
@@ -454,38 +541,15 @@ _CREATE_CENSOR_SCHEMA: dict[str, Any] = {
 }
 
 
-def create_nous_mcp_server(brain: Brain, heart: Heart) -> Any:
-    """Create an in-process MCP server with Nous tools for the Claude Agent SDK.
+def register_nous_tools(dispatcher: ToolDispatcher, brain: Brain, heart: Heart) -> None:
+    """Create Nous memory tools and register them with the dispatcher.
 
-    Wraps the closure-based tools from ``create_nous_tools`` with SDK ``@tool``
-    decorators and bundles them into a ``McpSdkServerConfig`` suitable for
-    ``ClaudeAgentOptions.mcp_servers``.
-
-    Returns:
-        ``McpSdkServerConfig`` dict (``{"type": "sdk", "name": ..., "instance": ...}``).
+    This is the main wiring function called at startup to register
+    all 4 memory tools with their schemas.
     """
-    from claude_agent_sdk import create_sdk_mcp_server, tool
-
     closures = create_nous_tools(brain, heart)
 
-    @tool("record_decision", "Record a decision to the Brain (decision intelligence organ)", _RECORD_DECISION_SCHEMA)
-    async def sdk_record_decision(args: dict[str, Any]) -> dict[str, Any]:
-        return await closures["record_decision"](**args)
-
-    @tool("learn_fact", "Store a fact in the Heart (memory system)", _LEARN_FACT_SCHEMA)
-    async def sdk_learn_fact(args: dict[str, Any]) -> dict[str, Any]:
-        return await closures["learn_fact"](**args)
-
-    @tool("recall_deep", "Search across all memory types in Heart and Brain", _RECALL_DEEP_SCHEMA)
-    async def sdk_recall_deep(args: dict[str, Any]) -> dict[str, Any]:
-        return await closures["recall_deep"](**args)
-
-    @tool("create_censor", "Create a guardrail censor in the Heart", _CREATE_CENSOR_SCHEMA)
-    async def sdk_create_censor(args: dict[str, Any]) -> dict[str, Any]:
-        return await closures["create_censor"](**args)
-
-    return create_sdk_mcp_server(
-        "nous",
-        version="0.1.0",
-        tools=[sdk_record_decision, sdk_learn_fact, sdk_recall_deep, sdk_create_censor],
-    )
+    dispatcher.register("record_decision", closures["record_decision"], _RECORD_DECISION_SCHEMA)
+    dispatcher.register("learn_fact", closures["learn_fact"], _LEARN_FACT_SCHEMA)
+    dispatcher.register("recall_deep", closures["recall_deep"], _RECALL_DEEP_SCHEMA)
+    dispatcher.register("create_censor", closures["create_censor"], _CREATE_CENSOR_SCHEMA)

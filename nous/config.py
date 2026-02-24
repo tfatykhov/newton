@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     anthropic_api_key: str = Field("", validation_alias="ANTHROPIC_API_KEY")
-    # Dual auth: auth_token takes precedence over api_key (SDK uses auth_token)
+    # Dual auth: auth_token (Bearer) takes precedence over api_key (x-api-key)
     anthropic_auth_token: str = Field("", validation_alias="ANTHROPIC_AUTH_TOKEN")
 
     # Agent identity
@@ -51,18 +51,12 @@ class Settings(BaseSettings):
     model: str = "claude-sonnet-4-5-20250514"
     max_tokens: int = 4096
 
-    # SDK settings (claude-agent-sdk)
-    sdk_max_turns: int = 10  # Max tool use iterations per query
-    sdk_permission_mode: str = "default"  # default, acceptEdits, plan, bypassPermissions
-    sdk_workspace: str = "/tmp/nous-workspace"
-    sdk_allowed_tools: list[str] = Field(
-        default_factory=lambda: [
-            "record_decision",
-            "learn_fact",
-            "recall_deep",
-            "create_censor",
-        ]
-    )
+    # Direct API settings
+    max_turns: int = 10  # Max tool use iterations per turn
+    api_base_url: str = "https://api.anthropic.com"
+    api_timeout_connect: int = 10  # seconds
+    api_timeout_read: int = 120  # seconds
+    workspace_dir: str = "/tmp/nous-workspace"
 
     @property
     def db_url(self) -> str:

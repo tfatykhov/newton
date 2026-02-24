@@ -17,7 +17,9 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
+from nous.api.builtin_tools import register_builtin_tools
 from nous.api.runner import AgentRunner
+from nous.api.tools import ToolDispatcher, register_nous_tools
 from nous.brain import Brain
 from nous.brain.embeddings import EmbeddingProvider
 from nous.cognitive import CognitiveLayer
@@ -54,7 +56,14 @@ async def create_components(settings: Settings) -> dict:
     brain = Brain(database, settings, embedding_provider)
     heart = Heart(database, settings, embedding_provider, owns_embeddings=False)  # F4
     cognitive = CognitiveLayer(brain, heart, settings, settings.identity_prompt)
+
+    # Create tool dispatcher and register all tools
+    dispatcher = ToolDispatcher()
+    register_nous_tools(dispatcher, brain, heart)
+    register_builtin_tools(dispatcher, settings)
+
     runner = AgentRunner(cognitive, brain, heart, settings)
+    runner.set_dispatcher(dispatcher)
     await runner.start()
 
     return {
@@ -63,6 +72,7 @@ async def create_components(settings: Settings) -> dict:
         "heart": heart,
         "cognitive": cognitive,
         "runner": runner,
+        "dispatcher": dispatcher,
         "embedding_provider": embedding_provider,
     }
 
@@ -109,9 +119,9 @@ def build_app(settings: Settings) -> Starlette:
 
         logger.info("Nous started: %s (%s)", settings.agent_name, settings.agent_id)
         logger.info(
-            "SDK: max_turns=%d, workspace=%s",
-            settings.sdk_max_turns,
-            settings.sdk_workspace,
+            "API: max_turns=%d, workspace=%s",
+            settings.max_turns,
+            settings.workspace_dir,
         )
         yield
 
