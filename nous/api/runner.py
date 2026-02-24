@@ -33,7 +33,7 @@ _DECISION_FRAMES = frozenset({"decision", "task", "debug"})
 # Frame-gated tool access (D5)
 FRAME_TOOLS: dict[str, list[str]] = {
     "conversation": ["record_decision", "learn_fact", "recall_deep", "create_censor", "bash", "read_file", "write_file"],
-    "question": ["recall_deep"],
+    "question": ["recall_deep", "bash", "read_file", "write_file", "record_decision", "learn_fact", "create_censor"],
     "decision": ["record_decision", "recall_deep", "create_censor", "bash", "read_file"],
     "creative": ["learn_fact", "recall_deep", "write_file"],
     "task": ["*"],  # All tools
