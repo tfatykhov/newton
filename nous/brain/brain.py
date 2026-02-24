@@ -8,6 +8,7 @@ its own session from the database connection pool.
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from uuid import UUID
@@ -47,6 +48,12 @@ from nous.storage.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Noise indicators — short descriptions with no alternatives/reasoning signal
+_NOISE_KEYWORDS = frozenset({
+    "completed", "done", "finished", "success", "started",
+    "status", "progress", "update", "checked", "confirmed",
+})
 
 
 class Brain:
@@ -162,12 +169,49 @@ class Brain:
                 return result
         return await self._record(input, session)
 
+    def _is_noise_decision(self, description: str, reasons: list[ReasonInput]) -> bool:
+        """Lightweight pre-check to detect obvious non-decisions.
+
+        Returns True if the description looks like a status report
+        rather than a real decision. Checks:
+        1. Very short description (<20 chars) with no reasons
+        2. Description is mostly noise keywords with no reasoning
+
+        This is a SOFT filter — it logs a warning but does not block.
+        The frame instruction changes (C1) are the primary fix.
+        """
+        desc_lower = description.lower().strip()
+
+        # Very short with no reasons — almost certainly noise
+        if len(desc_lower) < 20 and not reasons:
+            return True
+
+        # P1-4: Use regex tokenization to strip punctuation
+        # "completed." -> "completed" (matches _NOISE_KEYWORDS)
+        words = set(re.findall(r'\w+', desc_lower))
+        if not words:
+            return True
+        noise_count = len(words & _NOISE_KEYWORDS)
+        # If >50% of words are noise keywords and no reasons provided
+        if noise_count / len(words) > 0.5 and not reasons:
+            return True
+
+        return False
+
     async def _record(self, input: RecordInput, session: AsyncSession) -> DecisionDetail:
         """Internal record implementation using provided session.
 
         Steps 4-7 use ORM cascade — single session.add(decision) inserts
         the decision, tags, reasons, and bridge together (P1-1).
         """
+        # C2: Noise check — warn but still record (soft filter)
+        if self._is_noise_decision(input.description, input.reasons):
+            logger.warning(
+                "Possible noise decision detected: '%s' — "
+                "consider if this is a real choice between alternatives",
+                input.description[:80],
+            )
+
         # 1. Compute quality score
         reasons_dicts = [r.model_dump() for r in input.reasons]
         quality_score = self.quality.compute(

@@ -22,7 +22,7 @@ from nous.cognitive.deliberation import DeliberationEngine
 from nous.cognitive.frames import FrameEngine
 from nous.cognitive.intent import IntentClassifier
 from nous.cognitive.monitor import MonitorEngine
-from nous.cognitive.schemas import Assessment, TurnContext, TurnResult
+from nous.cognitive.schemas import Assessment, SessionMetadata, TurnContext, TurnResult
 from nous.cognitive.usage_tracker import UsageTracker
 from nous.config import Settings
 from nous.heart.heart import Heart
@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 # P2-9: Reflection parsing regex — case-insensitive, supports markdown bullets
 _LEARNED_PATTERN = re.compile(r"^\s*[-*]?\s*learned:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+
+# Significance threshold constants (005.5 Phase A)
+_MIN_CONTENT_LENGTH = 200  # Combined user+assistant chars
+_MIN_TURNS_WITHOUT_TOOLS = 1  # R: off-by-one fix — turn_count is incremented in post_turn,
+                               # so during turn 2's pre_turn, turn_count==1
 
 
 class CognitiveLayer:
@@ -85,6 +90,10 @@ class CognitiveLayer:
         # asyncio.Lock per session can come later.
         self._active_episodes: dict[str, str] = {}  # session_id -> episode_id
 
+        # 005.5: Session metadata for significance filtering
+        # P1-8: Known memory leak on abandoned sessions (same as _active_episodes)
+        self._session_metadata: dict[str, SessionMetadata] = {}  # session_id -> metadata
+
     async def list_frames(self, agent_id: str, session: AsyncSession | None = None) -> list:
         """Public delegation to FrameEngine.list_frames()."""
         return await self._frames.list_frames(agent_id, session=session)
@@ -116,6 +125,13 @@ class CognitiveLayer:
             conversation_messages: Recent user messages for dedup (F4).
                 Optional — without it, dedup is skipped (backward compat).
         """
+        # 1b. Track user input for significance (005.5 Phase A)
+        meta = self._session_metadata.setdefault(session_id, SessionMetadata())
+        meta.total_user_chars += len(user_input)
+        # Check for explicit remember request
+        if any(kw in user_input.lower() for kw in ("remember this", "remember that", "don't forget", "save this")):
+            meta.has_explicit_remember = True
+
         # 2. FRAME — select cognitive frame (F5: agent_id first)
         try:
             frame = await self._frames.select(agent_id, user_input, session=session)
@@ -167,19 +183,25 @@ class CognitiveLayer:
             logger.warning("Deliberation start failed, continuing without decision_id")
             decision_id = None
 
-        # 5. EPISODE — start if no active episode for this session
+        # 5. EPISODE — start if no active episode AND interaction is significant
         if session_id not in self._active_episodes:
-            try:
-                # P1-5: Construct EpisodeInput pydantic model
-                episode_input = EpisodeInput(
-                    summary=user_input[:200],
-                    frame_used=frame.frame_id,
-                    trigger="user_message",
-                )
-                episode = await self._heart.start_episode(episode_input, session=session)
-                self._active_episodes[session_id] = str(episode.id)
-            except Exception:
-                logger.warning("Failed to start episode for session %s", session_id)
+            if self._should_create_episode(session_id, user_input):
+                try:
+                    # B1: Check for duplicate — skip creation if found
+                    # R-P0-2: Do NOT store existing episode IDs in _active_episodes
+                    # because end_session would corrupt the original episode.
+                    if await self._is_duplicate_episode(user_input[:200], session=session):
+                        logger.debug("Skipping episode creation — duplicate found")
+                    else:
+                        episode_input = EpisodeInput(
+                            summary=user_input[:200],
+                            frame_used=frame.frame_id,
+                            trigger="user_message",
+                        )
+                        episode = await self._heart.start_episode(episode_input, session=session)
+                        self._active_episodes[session_id] = str(episode.id)
+                except Exception:
+                    logger.warning("Failed to start episode for session %s", session_id)
 
         # 6. WORKING MEMORY — update focus
         # P1-7: Must call get_or_create before focus
@@ -306,7 +328,15 @@ class CognitiveLayer:
                         overlap_score=overlap,
                     )
 
-        # 5. EMIT EVENT — P2-7: delegate to Brain.emit_event()
+        # 5. Update session metadata for significance tracking (005.5)
+        meta = self._session_metadata.setdefault(session_id, SessionMetadata())
+        meta.turn_count += 1
+        meta.total_assistant_chars += len(turn_result.response_text)
+        # Track tool usage (set — O(1) add)
+        for tr in turn_result.tool_results:
+            meta.tools_used.add(tr.tool_name)
+
+        # 6. EMIT EVENT — P2-7: delegate to Brain.emit_event()
         try:
             await self._brain.emit_event(
                 "turn_completed",
@@ -324,6 +354,98 @@ class CognitiveLayer:
 
         return assessment
 
+    # ------------------------------------------------------------------
+    # Episode significance & dedup (005.5)
+    # ------------------------------------------------------------------
+
+    def _should_create_episode(self, session_id: str, user_input: str) -> bool:
+        """Determine if this interaction is significant enough for an episode.
+
+        Creates episode when ANY of:
+        - First turn of session (turn_count == 0)
+        - Session has 2+ turns (multi-turn conversation)
+        - Tools were used (indicates real work)
+        - Combined content exceeds 200 chars AND turn_count >= 1
+        - User explicitly asks to remember something
+
+        Always creates on first turn of a session to avoid losing
+        the start of significant conversations. The episode will be
+        retroactively discarded at end_session if it stays trivial.
+
+        R-P0-1: Check turn_count == 0 (not meta is None) because
+        pre_turn tracking creates metadata via setdefault() BEFORE
+        this method runs. meta is never None after first pre_turn.
+        """
+        meta = self._session_metadata.get(session_id)
+        if meta is None or meta.turn_count == 0:
+            # First turn — always create (will filter at end if trivial)
+            return True
+
+        # Explicit remember request
+        if meta.has_explicit_remember:
+            return True
+
+        # Tools were used — real work happened
+        if meta.tools_used:
+            return True
+
+        # Multi-turn conversation
+        if meta.turn_count >= _MIN_TURNS_WITHOUT_TOOLS:
+            return True
+
+        # Content threshold (need at least 1 prior turn)
+        # R-P1-1: Don't add len(user_input) — already in meta.total_user_chars
+        total_chars = meta.total_user_chars + meta.total_assistant_chars
+        if total_chars >= _MIN_CONTENT_LENGTH and meta.turn_count >= 1:
+            return True
+
+        return False
+
+    async def _is_duplicate_episode(
+        self,
+        summary: str,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Check if a similar recent episode already exists.
+
+        Returns True if a recent episode (within 48h) with >0.85 cosine
+        similarity exists, meaning we should skip creating a new episode.
+
+        R-P0-2: Returns bool, NOT episode_id. We never store reused IDs in
+        _active_episodes because end_session would corrupt/delete the
+        original episode.
+
+        R-P1-2: Uses direct cosine similarity via EmbeddingProvider, NOT
+        hybrid_search (which returns 0.7*vector + 0.3*keyword combined scores
+        that max at ~0.79 for perfect vector match — making 0.85 unreachable).
+
+        R-P1-3: Filters to episodes started within last 48 hours to avoid
+        matching ancient episodes about similar topics.
+        """
+        if not self._heart.episodes.embeddings:
+            return False  # No embeddings available — skip dedup
+
+        try:
+            # Generate embedding for current input
+            query_embedding = await self._heart.episodes.embeddings.embed(summary)
+
+            # Search recent episodes with direct cosine similarity
+            results = await self._heart.search_recent_episodes_by_embedding(
+                query_embedding,
+                hours=48,
+                limit=1,
+                session=session,
+            )
+            if results and results[0][1] > 0.85:
+                logger.debug(
+                    "Found duplicate episode (%.2f cosine similarity), skipping creation",
+                    results[0][1],
+                )
+                return True
+        except Exception:
+            logger.warning("Episode dedup check failed, proceeding with creation")
+        return False
+
     async def end_session(
         self,
         agent_id: str,
@@ -334,31 +456,43 @@ class CognitiveLayer:
         """Clean up session state with optional reflection.
 
         1. If active episode exists for this session:
-           - End it with outcome="completed"
-           - If reflection provided, include as episode lessons
+           - Check if trivial (single turn, no tools, short content) — soft-delete
+           - Otherwise end with outcome="success" and optional lessons
         2. If reflection provided, extract facts:
            - Parse for "learned: ..." lines (P2-9)
            - Store each as a fact via Heart.learn() with source="reflection"
            - P1-5: Construct FactInput pydantic model
-        3. Remove from self._active_episodes (P3-10: use .pop for safety)
+        3. Remove from self._active_episodes and _session_metadata
         4. Emit "session_ended" event
         """
-        # 1. End active episode
-        # P3-10: Use .pop(session_id, None) for safety
+        # 1. End active episode (or discard if trivial)
         episode_id = self._active_episodes.pop(session_id, None)
+        meta = self._session_metadata.pop(session_id, None)
+
         if episode_id:
             try:
-                lessons = None
-                if reflection:
-                    lessons = [reflection[:500]]
-
-                # P1-8: No summary param on end()
-                await self._heart.end_episode(
-                    UUID(episode_id),
-                    outcome="success",
-                    lessons_learned=lessons,
-                    session=session,
+                # Discard trivial episodes: single turn, no tools, short content
+                is_trivial = (
+                    meta is not None
+                    and meta.turn_count <= 1
+                    and not meta.tools_used
+                    and (meta.total_user_chars + meta.total_assistant_chars) < _MIN_CONTENT_LENGTH
                 )
+
+                if is_trivial:
+                    # Soft-delete the episode instead of keeping noise
+                    await self._heart.deactivate_episode(UUID(episode_id), session=session)
+                    logger.debug("Discarded trivial episode %s", episode_id)
+                else:
+                    lessons = None
+                    if reflection:
+                        lessons = [reflection[:500]]
+                    await self._heart.end_episode(
+                        UUID(episode_id),
+                        outcome="success",
+                        lessons_learned=lessons,
+                        session=session,
+                    )
             except Exception:
                 logger.warning("Failed to end episode %s", episode_id)
 

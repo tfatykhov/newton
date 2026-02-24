@@ -338,6 +338,77 @@ class EpisodeManager:
         ]
 
     # ------------------------------------------------------------------
+    # deactivate()
+    # ------------------------------------------------------------------
+
+    async def deactivate(self, episode_id: UUID, session: AsyncSession | None = None) -> None:
+        """Soft-delete an episode (set active=False)."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._deactivate(episode_id, session)
+                await session.commit()
+                return
+        await self._deactivate(episode_id, session)
+
+    async def _deactivate(self, episode_id: UUID, session: AsyncSession) -> None:
+        episode = await self._get_episode_orm(episode_id, session)
+        if episode:
+            episode.active = False
+            await session.flush()
+
+    # ------------------------------------------------------------------
+    # search_recent_by_embedding()
+    # ------------------------------------------------------------------
+
+    async def search_recent_by_embedding(
+        self,
+        query_embedding: list[float],
+        hours: int = 48,
+        limit: int = 1,
+        session: AsyncSession | None = None,
+    ) -> list[tuple[UUID, float]]:
+        """Find recent episodes by direct cosine similarity.
+
+        Returns list of (episode_id, cosine_similarity) tuples.
+        Only searches episodes within the given time window.
+        """
+        if session is None:
+            async with self.db.session() as session:
+                return await self._search_recent_by_embedding(
+                    query_embedding, hours, limit, session
+                )
+        return await self._search_recent_by_embedding(
+            query_embedding, hours, limit, session
+        )
+
+    async def _search_recent_by_embedding(
+        self,
+        query_embedding: list[float],
+        hours: int,
+        limit: int,
+        session: AsyncSession,
+    ) -> list[tuple[UUID, float]]:
+        from sqlalchemy import text
+
+        sql = text("""
+            SELECT id, 1 - (embedding <=> :embedding::vector) AS cosine_sim
+            FROM heart.episodes
+            WHERE agent_id = :agent_id
+              AND active = true
+              AND embedding IS NOT NULL
+              AND started_at > NOW() - make_interval(hours => :hours)
+            ORDER BY embedding <=> :embedding::vector
+            LIMIT :limit
+        """)
+        result = await session.execute(sql, {
+            "embedding": str(query_embedding),
+            "agent_id": self.agent_id,
+            "hours": hours,
+            "limit": limit,
+        })
+        return [(row[0], float(row[1])) for row in result.fetchall()]
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 

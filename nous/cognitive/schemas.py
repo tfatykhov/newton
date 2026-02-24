@@ -6,9 +6,21 @@ and its consumers (the Runtime in 005).
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+@dataclass
+class SessionMetadata:
+    """Tracks session-level signals for episode significance."""
+
+    turn_count: int = 0
+    tools_used: set[str] = field(default_factory=set)  # P2: set not list for O(1) lookup
+    total_user_chars: int = 0
+    total_assistant_chars: int = 0
+    has_explicit_remember: bool = False
 
 
 class FrameType(StrEnum):
