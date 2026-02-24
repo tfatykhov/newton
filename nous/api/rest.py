@@ -16,13 +16,14 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from uuid import UUID, uuid4
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 from nous.api.runner import AgentRunner
@@ -82,6 +83,43 @@ def create_app(
         except Exception as e:
             logger.error("Chat error: %s", e)
             return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def chat_stream(request: Request) -> StreamingResponse:
+        """POST /chat/stream - SSE streaming chat."""
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+        message = body.get("message")
+        if not message:
+            return JSONResponse({"error": "Missing required field: message"}, status_code=400)
+
+        session_id = body.get("session_id") or str(uuid4())
+
+        async def event_generator():
+            try:
+                async for event in runner.stream_chat(session_id, message):
+                    data = json.dumps({
+                        "type": event.type,
+                        "text": event.text,
+                        "tool_name": event.tool_name,
+                        "stop_reason": event.stop_reason,
+                    })
+                    yield f"data: {data}\n\n"
+            except Exception as e:
+                logger.error("Stream error: %s", e)
+                error_data = json.dumps({"type": "error", "text": str(e)})
+                yield f"data: {error_data}\n\n"
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     async def end_chat(request: Request) -> JSONResponse:
         """DELETE /chat/{session_id} - End a conversation."""
@@ -272,6 +310,7 @@ def create_app(
 
     routes = [
         Route("/chat", chat, methods=["POST"]),
+        Route("/chat/stream", chat_stream, methods=["POST"]),
         Route("/chat/{session_id}", end_chat, methods=["DELETE"]),
         Route("/status", status),
         Route("/decisions", list_decisions),
