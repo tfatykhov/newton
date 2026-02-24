@@ -226,6 +226,9 @@ CREATE TABLE heart.episodes (
     active BOOLEAN DEFAULT TRUE,
     encoded_censors JSONB,
     compression_tier VARCHAR(20) DEFAULT 'raw',
+    structured_summary JSONB,
+    user_id VARCHAR(100),
+    user_display_name VARCHAR(100),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -399,6 +402,8 @@ CREATE INDEX idx_calibration_agent ON brain.calibration_snapshots(agent_id, snap
 CREATE INDEX idx_episodes_agent ON heart.episodes(agent_id);
 CREATE INDEX idx_episodes_started ON heart.episodes(started_at DESC);
 CREATE INDEX idx_episodes_outcome ON heart.episodes(outcome);
+CREATE INDEX idx_episodes_user_id ON heart.episodes(user_id);
+CREATE INDEX idx_episodes_summary_gin ON heart.episodes USING GIN(structured_summary);
 CREATE INDEX idx_episodes_tags ON heart.episodes USING GIN(tags);
 CREATE INDEX idx_episodes_embedding ON heart.episodes
     USING hnsw(embedding vector_cosine_ops);

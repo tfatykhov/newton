@@ -311,6 +311,9 @@ class Episode(Base):
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     encoded_censors = mapped_column(JSONB, nullable=True)
     compression_tier: Mapped[str | None] = mapped_column(String(20), server_default="raw")
+    structured_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    user_display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
     # Relationships
