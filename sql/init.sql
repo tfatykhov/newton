@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Nous Database Schema — init.sql
--- 18 tables across 3 schemas: nous_system (3), brain (8), heart (7)
+-- 19 tables across 3 schemas: nous_system (4), brain (8), heart (7)
 -- Embedding dimension: vector(1536) for text-embedding-3-small
 -- =============================================================================
 
@@ -29,7 +29,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ===========================================================================
--- NOUS_SYSTEM SCHEMA (3 tables)
+-- NOUS_SYSTEM SCHEMA (4 tables)
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -77,6 +77,16 @@ CREATE TABLE nous_system.events (
     event_type VARCHAR(50) NOT NULL,
     data JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------
+-- nous_system.schema_migrations — tracks applied SQL migrations
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS nous_system.schema_migrations (
+    version    VARCHAR(20) PRIMARY KEY,
+    name       VARCHAR(255) NOT NULL,
+    checksum   VARCHAR(64) NOT NULL,
+    applied_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ===========================================================================

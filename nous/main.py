@@ -29,6 +29,7 @@ from nous.config import Settings
 from nous.events import Event, EventBus
 from nous.heart import Heart
 from nous.storage.database import Database
+from nous.storage.migrator import run_migrations
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ async def create_components(settings: Settings) -> dict:
     """
     database = Database(settings)
     await database.connect()  # F1: connect() not initialize()
+    await run_migrations(database.engine)  # Apply pending SQL migrations
 
     embedding_provider = None
     if settings.openai_api_key:
