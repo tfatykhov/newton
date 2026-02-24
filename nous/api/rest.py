@@ -72,10 +72,11 @@ def create_app(
                 result["debug"] = {
                     "system_prompt": turn_context.system_prompt,
                     "frame_confidence": turn_context.frame.confidence,
-                    "active_censors": len(turn_context.censors),
-                    "related_decisions": len(turn_context.decisions),
-                    "related_facts": len(turn_context.facts),
-                    "related_episodes": len(turn_context.episodes),
+                    "active_censors": len(turn_context.active_censors),
+                    "related_decisions": len(turn_context.recalled_decision_ids),
+                    "related_facts": len(turn_context.recalled_fact_ids),
+                    "related_episodes": len(turn_context.recalled_episode_ids),
+                    "context_tokens": turn_context.context_token_estimate,
                 }
             return JSONResponse(result)
         except Exception as e:
