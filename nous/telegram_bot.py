@@ -153,14 +153,16 @@ class NousTelegramBot:
             # Add debug info if requested
             if debug and "debug" in data:
                 d = data["debug"]
+                prompt = d.get("system_prompt", "(empty)")
                 debug_text = (
-                    f"\n\n---\n🔍 Debug:\n"
+                    f"\n\n---\n🔍 Debug Info:\n"
                     f"Frame: {frame} (confidence: {d.get('frame_confidence', '?')})\n"
                     f"Censors: {d.get('active_censors', 0)}\n"
                     f"Decisions: {d.get('related_decisions', 0)}\n"
                     f"Facts: {d.get('related_facts', 0)}\n"
                     f"Episodes: {d.get('related_episodes', 0)}\n"
-                    f"System prompt length: {len(d.get('system_prompt', ''))} chars"
+                    f"Context tokens: {d.get('context_tokens', 0)}\n"
+                    f"\n📋 SYSTEM PROMPT:\n{prompt}"
                 )
                 reply += debug_text
 
