@@ -1,6 +1,6 @@
 # 005: Agent Runtime — The Deployment Shell
 
-**Status:** Ready to Build (SDK Edition)
+**Status:** Shipped
 **Priority:** P0 — Makes Nous actually runnable
 **Estimated Effort:** 10-12 hours
 **Prerequisites:** 001 (merged), 002 (merged), 003 (merged), 004-cognitive-layer (merged)

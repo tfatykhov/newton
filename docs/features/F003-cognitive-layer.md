@@ -1,6 +1,6 @@
 # F003: Cognitive Layer (The Nous Loop)
 
-**Status:** Planned
+**Status:** Shipped (PR #10)
 **Priority:** P0 — The thinking machinery
 **Origin:** Minsky's Society of Mind, implemented as Claude Agent SDK hooks
 

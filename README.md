@@ -258,7 +258,23 @@ Both projects evolve independently. The shared asset is the philosophy, not the 
 
 ## Status
 
-🔬 **Research phase** — exploring the architecture and documenting principles.
+🚀 **v0.1.0 — shipped and deployed.**
+
+All core architecture is implemented and running:
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| Brain (F001) | ✅ Shipped | Decision recording, deliberation traces, calibration, guardrails, graph |
+| Heart (F002) | ✅ Shipped | Episodes, facts, procedures, censors, working memory |
+| Cognitive Layer (F003) | ✅ Shipped | Frame selection, recall, deliberation, monitoring, reflection |
+| Runtime (F004) | ✅ Shipped | REST API (12 endpoints), MCP server, Telegram bot |
+| Context Engine (F005) | ✅ Shipped | Intent-driven retrieval, token budgets, dedup |
+| Event Bus (F006) | ✅ Shipped | In-process async bus with automated handlers |
+| Memory Improvements (F010) | ✅ Shipped | Episode summaries, fact extraction, user tagging |
+
+**Stats:** ~11,800 lines of Python · 424 tests · 18 Postgres tables · Docker deployment
+
+See [Feature Index](docs/features/INDEX.md) for the full breakdown.
 
 ## License
 
