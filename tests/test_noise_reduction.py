@@ -22,24 +22,9 @@ from nous.cognitive.schemas import FrameSelection, TurnContext
 
 
 # ---------------------------------------------------------------------------
-# SessionMetadata — local definition for test isolation.
-#
-# The implementation will add this to nous.cognitive.schemas. We define it
-# here so tests are self-contained and don't fail on import if the
-# implementation hasn't landed yet. Once 005.5 is implemented, this can
-# be replaced with: from nous.cognitive.schemas import SessionMetadata
+# SessionMetadata — imported from the real module (005.5 landed).
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class SessionMetadata:
-    """Tracks session-level signals for episode significance."""
-
-    turn_count: int = 0
-    tools_used: set[str] = field(default_factory=set)
-    total_user_chars: int = 0
-    total_assistant_chars: int = 0
-    has_explicit_remember: bool = False
+from nous.cognitive.schemas import SessionMetadata
 
 
 # ---------------------------------------------------------------------------

@@ -951,12 +951,12 @@ class TestSleepHandler:
         """39. Reflection generates facts from cross-session patterns (mock LLM)."""
         handler, brain, heart, bus, http_client = self._make_sleep_handler()
 
-        # Mock search_episodes returning >= 2 episodes
+        # Mock list_episodes returning >= 2 episodes
         ep1 = MagicMock()
         ep1.summary = "Discussed Python testing patterns"
         ep2 = MagicMock()
         ep2.summary = "Worked on Python async code"
-        heart.search_episodes = AsyncMock(return_value=[ep1, ep2])
+        heart.list_episodes = AsyncMock(return_value=[ep1, ep2])
         heart.learn = AsyncMock()
 
         reflection_json = {
@@ -988,7 +988,7 @@ class TestSleepHandler:
         # Only 1 episode
         ep1 = MagicMock()
         ep1.summary = "Single episode"
-        heart.search_episodes = AsyncMock(return_value=[ep1])
+        heart.list_episodes = AsyncMock(return_value=[ep1])
         heart.learn = AsyncMock()
 
         await handler._phase_reflect()
