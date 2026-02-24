@@ -150,6 +150,10 @@ class Heart:
         """Link a procedure to an episode."""
         await self.episodes.link_procedure(episode_id, procedure_id, effectiveness, session)
 
+    async def deactivate_episode(self, episode_id: UUID, session: AsyncSession | None = None) -> None:
+        """Soft-delete a trivial episode."""
+        await self.episodes.deactivate(episode_id, session=session)
+
     async def search_episodes(
         self,
         query: str,
@@ -158,6 +162,18 @@ class Heart:
     ) -> list[EpisodeSummary]:
         """Search episodes."""
         return await self.episodes.search(query, limit, session)
+
+    async def search_recent_episodes_by_embedding(
+        self,
+        query_embedding: list[float],
+        hours: int = 48,
+        limit: int = 1,
+        session: AsyncSession | None = None,
+    ) -> list[tuple[UUID, float]]:
+        """Search recent episodes by direct cosine similarity for dedup."""
+        return await self.episodes.search_recent_by_embedding(
+            query_embedding, hours=hours, limit=limit, session=session
+        )
 
     # ==================================================================
     # Facts
