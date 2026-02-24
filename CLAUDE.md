@@ -114,6 +114,14 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | `NOUS_AGENT_ID` | `nous-default` | Agent identifier |
 | `NOUS_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
 | `NOUS_LOG_LEVEL` | `info` | Log level |
+| `NOUS_EVENT_BUS_ENABLED` | `true` | Enable async event bus |
+| `NOUS_EPISODE_SUMMARY_ENABLED` | `true` | Enable episode summarization handler |
+| `NOUS_FACT_EXTRACTION_ENABLED` | `true` | Enable fact extraction handler |
+| `NOUS_SLEEP_ENABLED` | `true` | Enable sleep/reflection handler |
+| `NOUS_BACKGROUND_MODEL` | `claude-sonnet-4-5-20250514` | Model for background LLM tasks |
+| `NOUS_SESSION_TIMEOUT` | `1800` | Session idle timeout in seconds |
+| `NOUS_SLEEP_TIMEOUT` | `7200` | Sleep mode timeout in seconds |
+| `NOUS_SLEEP_CHECK_INTERVAL` | `60` | Sleep check interval in seconds |
 
 ## Implementation Specs
 
