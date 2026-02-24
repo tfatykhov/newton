@@ -1,6 +1,6 @@
 # F006: Event Bus & Automation Pipeline
 
-**Status:** Planned
+**Status:** Shipped
 **Priority:** P0 — Makes everything automatic
 **Detail:** See [012-automation-pipeline](../research/012-automation-pipeline.md)
 

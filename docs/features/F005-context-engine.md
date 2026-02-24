@@ -1,6 +1,6 @@
 # F005: Context Engine
 
-**Status:** Planned
+**Status:** Shipped (merged into F003, implemented as cognitive/context.py)
 **Priority:** P0 — Core capability
 **Detail:** See [009-context-management](../research/009-context-management.md), [010-summarization-strategy](../research/010-summarization-strategy.md)
 

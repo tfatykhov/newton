@@ -1,6 +1,6 @@
 # F010: Memory Improvements
 
-**Status:** Spec Ready  
+**Status:** Shipped (PR #21)  
 **Priority:** P1 — Improves memory quality, context richness, and multi-user clarity  
 **Covers:** Episode Summaries, Clean Decision Descriptions, Proactive Fact Learning, User-Tagged Episodes
 

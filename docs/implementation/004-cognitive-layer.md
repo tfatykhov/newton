@@ -1,6 +1,6 @@
 # 004: Cognitive Layer — The Nous Loop
 
-**Status:** Ready to Build
+**Status:** Shipped (PR #10)
 **Priority:** P0 — Orchestrator that makes Brain + Heart think together
 **Estimated Effort:** 10-14 hours
 **Prerequisites:** 001-postgres-scaffold (merged), 002-brain-module (merged), 003-heart-module (merged)

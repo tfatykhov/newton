@@ -1,6 +1,6 @@
 # F004: Agent Runtime (Docker)
 
-**Status:** Planned
+**Status:** Shipped
 **Priority:** P0 — Deployment shell
 **Origin:** Requirement for containerized, cloud-ready deployment
 

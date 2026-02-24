@@ -5,12 +5,12 @@
 ### P0: Core Architecture
 | Feature | Name | Status | Description |
 |---------|------|--------|-------------|
-| F001 | [Brain Module](F001-brain-module.md) | Shipped | Decision intelligence — recording, deliberation, calibration, guardrails, graph |
-| F002 | [Heart Module](F002-heart-module.md) | Shipped | Memory system — episodic, semantic, procedural, working, censors |
-| F003 | [Cognitive Layer](F003-cognitive-layer.md) | Spec Ready | The Nous Loop — frames, recall, deliberation, monitoring, end-of-session reflection |
-| F004 | [Runtime](F004-runtime.md) | Spec Ready | Docker container, REST API, MCP interface, project structure |
-| F005 | [Context Engine](F005-context-engine.md) | Merged into F003 | Frame-adaptive context assembly (implemented as `cognitive/context.py`) |
-| F006 | [Event Bus](F006-event-bus.md) | Planned | In-process async event bus, 7 automated handlers, 27/29 actions automatic |
+| F001 | [Brain Module](F001-brain-module.md) | ✅ Shipped | Decision intelligence — recording, deliberation, calibration, guardrails, graph |
+| F002 | [Heart Module](F002-heart-module.md) | ✅ Shipped | Memory system — episodic, semantic, procedural, working, censors |
+| F003 | [Cognitive Layer](F003-cognitive-layer.md) | ✅ Shipped | The Nous Loop — frames, recall, deliberation, monitoring, end-of-session reflection |
+| F004 | [Runtime](F004-runtime.md) | ✅ Shipped | Docker container, REST API, MCP interface, Telegram bot |
+| F005 | [Context Engine](F005-context-engine.md) | ✅ Shipped | Frame-adaptive context assembly (implemented as `cognitive/context.py`) |
+| F006 | [Event Bus](F006-event-bus.md) | ✅ Shipped | In-process async event bus, automated handlers |
 
 ### P1: Intelligence & Measurement
 | Feature | Name | Status | Description |
@@ -22,7 +22,28 @@
 | Feature | Name | Status | Description |
 |---------|------|--------|-------------|
 | F009 | [Async Subtasks](F009-async-subtasks.md) | Planned | Background task queue — parallel execution, non-blocking chat, Postgres-backed workers |
-| F010 | [Memory Improvements](F010-memory-improvements.md) | Spec Ready | Episode summaries, clean decision descriptions, proactive fact learning, user-tagged episodes |
+| F010 | [Memory Improvements](F010-memory-improvements.md) | ✅ Shipped | Episode summaries, clean decision descriptions, proactive fact learning, user-tagged episodes |
+
+### Implementation Specs
+
+All shipped implementation specs with PR references:
+
+| Spec | Name | Status | PR |
+|------|------|--------|-----|
+| 001 | Postgres Scaffold | ✅ Shipped | #1 |
+| 002 | Brain Module | ✅ Shipped | #2 |
+| 003 | Heart Module | ✅ Shipped | #3 |
+| 003.1 | Heart Enhancements | ✅ Shipped | #6 |
+| 003.2 | Frame-Tagged Encoding | ✅ Shipped | — |
+| 004 | Cognitive Layer | ✅ Shipped | #10 |
+| 004.1 | CEL Guardrails | ✅ Shipped | #10 |
+| 005 | Runtime (REST + MCP + Runner) | ✅ Shipped | — |
+| 005.1 | Smart Context Preparation | ✅ Shipped | — |
+| 005.2 | Direct API Rewrite | ✅ Shipped | #15 |
+| 005.3 | Web Tools | ✅ Shipped | #16 |
+| 005.4 | Streaming Responses | ✅ Shipped | #23 |
+| 005.5 | Noise Reduction | ✅ Shipped | #20 |
+| 006 | Event Bus | ✅ Shipped | — |
 
 ### v0.2.0 Preview (Future)
 | Feature | Name | Description |
@@ -33,6 +54,14 @@
 | F014 | Growth Engine | Administrative self-improvement (Papert's Principle) |
 | F015 | Multi-Agent | Nous agents sharing knowledge |
 | F016 | Dashboard | Visual growth tracking and cognitive state |
+
+## Stats
+
+- **Total source:** ~11,800 lines of Python
+- **Test count:** 424 tests across 33 test files
+- **Database:** 18 tables across 3 schemas (brain, heart, system)
+- **Tools:** 8 agent tools (record_decision, recall_deep, learn_fact, create_censor, bash, read_file, write_file, web_search, web_fetch)
+- **Endpoints:** 12 REST endpoints + MCP server + Telegram bot
 
 ## Research Notes
 
@@ -51,65 +80,61 @@
 | [011](../research/011-measuring-success.md) | Measuring Success | 5-level metrics, growth reports |
 | [012](../research/012-automation-pipeline.md) | Automation Pipeline | Event bus, 7 handlers, full wiring |
 | [013](../research/013-langchain-memory-lessons.md) | LangChain Memory Lessons | 5 takeaways: reflection, generalization, validation, approval gates |
+| [014](../research/014-group-evolving-agents.md) | GEA | Experience sharing for open-ended self-improvement |
+| [015](../research/015-deep-thinking-ratio.md) | DTR | Measuring real reasoning effort, not token count |
 
 ## Architecture Summary
 
 ```
 ┌──────────────────────────────────────────────┐
-│              Nous Agent (F004)              │
-│                                               │
+│              Nous Agent (F004)               │
+│                                              │
 │  ┌──────────────────────────────────────┐    │
 │  │      Cognitive Layer (F003)           │    │
 │  │  Frame → Recall → Deliberate →        │    │
 │  │  → Act → Monitor → Learn              │    │
 │  └────────┬─────────────────┬────────────┘    │
-│           │                 │                  │
-│  ┌────────▼──────┐ ┌───────▼─────────┐       │
-│  │  Brain (F001)  │ │  Heart (F002)    │       │
-│  │  Decisions     │ │  Episodes        │       │
-│  │  Deliberation  │ │  Facts           │       │
-│  │  Calibration   │ │  Procedures      │       │
-│  │  Guardrails    │ │  Censors         │       │
-│  │  Graph         │ │  Working Memory  │       │
-│  └────────┬──────┘ └───────┬─────────┘       │
-│           │                 │                  │
-│  ┌────────▼─────────────────▼──────────┐      │
-│  │  Context Engine (F005)               │      │
-│  │  Token budgets, relevance scoring,   │      │
-│  │  3-tier summarization                │      │
-│  └──────────────────────────────────────┘      │
-│                                               │
-│  ┌──────────────────────────────────────┐     │
-│  │  Event Bus (F006)                     │     │
-│  │  7 handlers, 27/29 actions automatic  │     │
+│           │                 │                 │
+│  ┌────────▼──────┐ ┌───────▼─────────┐      │
+│  │  Brain (F001)  │ │  Heart (F002)    │      │
+│  │  Decisions     │ │  Episodes        │      │
+│  │  Deliberation  │ │  Facts           │      │
+│  │  Calibration   │ │  Procedures      │      │
+│  │  Guardrails    │ │  Censors         │      │
+│  │  Graph         │ │  Working Memory  │      │
+│  └────────┬──────┘ └───────┬─────────┘      │
+│           │                 │                 │
+│  ┌────────▼─────────────────▼──────────┐     │
+│  │  Context Engine (F005)               │     │
+│  │  Token budgets, relevance scoring,   │     │
+│  │  intent-driven retrieval             │     │
 │  └──────────────────────────────────────┘     │
-│                                               │
-│  ┌──────────────────────────────────────┐     │
-│  │  Metrics & Growth (F007)              │     │
-│  │  5 levels, weekly reports             │     │
-│  └──────────────────────────────────────┘     │
-│                                               │
-│  ┌──────────────────────────────────────┐     │
-│  │  Memory Lifecycle (F008)              │     │
-│  │  Auto confirm/trim/archive/retire     │     │
-│  └──────────────────────────────────────┘     │
-│                                               │
-│  ┌──────────────┐  ┌────────────────────┐     │
-│  │ REST API      │  │ MCP (external)     │     │
-│  └──────────────┘  └────────────────────┘     │
-└───────────────────────┬───────────────────────┘
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │  Event Bus (F006)                     │    │
+│  │  Async handlers, DB persistence       │    │
+│  └──────────────────────────────────────┘    │
+│                                              │
+│  ┌──────────────┐  ┌────────────────────┐    │
+│  │ REST API      │  │ MCP Server         │    │
+│  └──────────────┘  └────────────────────┘    │
+│                                              │
+│  ┌──────────────────────────────────────┐    │
+│  │ Telegram Bot (streaming + usage)      │    │
+│  └──────────────────────────────────────┘    │
+└───────────────────────┬──────────────────────┘
                         │
                    ┌────▼─────┐
                    │ Postgres  │
                    │ pgvector  │
-                   │ 20 tables │
+                   │ 18 tables │
                    └──────────┘
 ```
 
-## Database: 20 Tables, 3 Schemas
+## Database: 18 Tables, 3 Schemas
 
 | Schema | Tables | Purpose |
 |--------|--------|---------|
-| `brain` (8) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
+| `brain` (7) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
 | `heart` (7) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory | Memory system |
-| `system` (5) | agents, frames, events, feedback, context_metrics, growth_reports | Config, tracking, metrics |
+| `system` (4) | agents, frames, events, context_metrics | Config, tracking |

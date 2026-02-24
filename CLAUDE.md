@@ -4,70 +4,134 @@
 
 Nous (Greek: mind/intellect) is a cognitive agent framework built on Minsky's Society of Mind principles. It gives AI agents persistent memory, decision intelligence, and the ability to learn from experience.
 
+**Status: v0.1.0 shipped and deployed.** All core architecture is live.
+
 ## Architecture
 
 ```
 Cognitive Layer (hooks into LLM calls)
     ├── Brain (decisions, deliberation, calibration, guardrails)
     ├── Heart (episodes, facts, procedures, censors, working memory)
-    ├── Context Engine (token budgets, relevance scoring, summarization)
+    ├── Context Engine (token budgets, relevance scoring, intent-driven retrieval)
     └── Event Bus (async handlers for automation)
 
+Runtime: Direct Anthropic API + tool dispatch loop
 Storage: PostgreSQL + pgvector (one DB, three schemas: brain/heart/system)
-API: REST + MCP (external interface only — internal calls are Python)
+API: REST (12 endpoints) + MCP server + Telegram bot (streaming)
 ```
 
 ## Project Structure
 
 ```
 nous/
-├── docker-compose.yml          # Postgres + pgvector
+├── docker-compose.yml          # Nous agent + Postgres + pgvector
+├── Dockerfile                  # Python container with OAT support
 ├── sql/
-│   ├── init.sql                # Full schema (17 tables, 3 schemas)
+│   ├── init.sql                # Full schema (18 tables, 3 schemas)
 │   └── seed.sql                # Default agent, frames, guardrails
-├── nous/                       # Python package
+├── nous/                       # Python package (~11,800 lines)
 │   ├── config.py               # Settings via pydantic-settings
+│   ├── main.py                 # Entry point, component wiring, lifecycle
+│   ├── telegram_bot.py         # Telegram interface (streaming + usage)
 │   ├── storage/                # Database layer (async SQLAlchemy)
+│   │   ├── database.py         # Connection pool, session management
+│   │   └── models.py           # ORM models for all 18 tables
 │   ├── brain/                  # Decision intelligence organ
+│   │   ├── brain.py            # Core: record, query, review, calibrate
+│   │   ├── bridge.py           # Structure + function descriptions
+│   │   ├── calibration.py      # Brier scores, confidence tracking
+│   │   ├── embeddings.py       # pgvector embedding provider
+│   │   ├── guardrails.py       # CEL expression guardrails
+│   │   ├── quality.py          # Decision quality scoring
+│   │   └── schemas.py          # Pydantic models
 │   ├── heart/                  # Memory system organ
+│   │   ├── heart.py            # Core: learn, recall, episode lifecycle
+│   │   ├── episodes.py         # Episodic memory
+│   │   ├── facts.py            # Semantic memory
+│   │   ├── procedures.py       # Procedural memory
+│   │   ├── censors.py          # Guardrail censors
+│   │   ├── working_memory.py   # Short-term scratch space
+│   │   ├── search.py           # Full-text + vector search
+│   │   └── schemas.py          # Pydantic models
 │   ├── cognitive/              # Cognitive layer (Nous Loop)
-│   └── api/                    # REST + MCP endpoints
-├── tests/                      # pytest + pytest-asyncio
+│   │   ├── layer.py            # pre_turn / post_turn / end_session
+│   │   ├── frames.py           # Frame selection (task, question, decision, etc.)
+│   │   ├── context.py          # Token-budgeted context assembly
+│   │   ├── deliberation.py     # Pre-action protocol
+│   │   ├── intent.py           # Intent classification for retrieval
+│   │   ├── dedup.py            # Conversation deduplication
+│   │   ├── monitor.py          # Post-turn self-assessment
+│   │   ├── usage_tracker.py    # Context usage feedback loop
+│   │   └── schemas.py          # TurnContext, TurnResult, etc.
+│   └── api/                    # External interfaces
+│       ├── rest.py             # Starlette REST API (12 endpoints)
+│       ├── mcp.py              # MCP server (nous_chat, nous_decide, etc.)
+│       ├── runner.py           # Agent runner (tool loop, streaming)
+│       ├── tools.py            # Tool dispatcher + registration
+│       ├── builtin_tools.py    # bash, read_file, write_file
+│       └── web_tools.py        # web_search, web_fetch
+├── tests/                      # 424 tests across 33 files
 └── docs/
-    ├── research/               # Theory & design notes (001-012)
-    ├── features/               # High-level feature specs (F001-F014)
-    └── implementation/         # Build-ready specs (001, 002, ...)
+    ├── research/               # Theory & design notes (001-015)
+    ├── features/               # High-level feature specs (F001-F016)
+    └── implementation/         # Build specs (001-006, all shipped)
 ```
+
+## What's Shipped (v0.1.0)
+
+| Spec | Component | PR |
+|------|-----------|----|
+| 001 | Postgres scaffold (18 tables, 3 schemas) | #1 |
+| 002 | Brain module (decisions, deliberation, calibration, guardrails) | #2 |
+| 003 | Heart module (episodes, facts, procedures, censors, working memory) | #3 |
+| 003.1 | Heart enhancements (contradiction detection, domain compaction) | #6 |
+| 003.2 | Frame-tagged memory encoding | — |
+| 004 | Cognitive Layer (frames, recall, deliberation, monitoring) | #10 |
+| 004.1 | CEL expression guardrails | #10 |
+| 005 | Runtime (REST API, MCP server, agent runner) | — |
+| 005.1 | Smart context preparation (intent-driven retrieval) | — |
+| 005.2 | Direct Anthropic API rewrite (replaced Claude Agent SDK) | #15 |
+| 005.3 | Web tools (web_search, web_fetch via Brave) | #16 |
+| 005.4 | Streaming responses (SSE + Telegram progressive editing) | #23 |
+| 005.5 | Noise reduction (frame instructions, decision filtering) | #20 |
+| 006 | Event Bus (async handlers, DB persistence) | — |
+| F010 | Memory improvements (episode summaries, fact extraction, user tagging) | #21 |
 
 ## How to Work
 
 ### Read Before Building
 
-1. Check `docs/implementation/` for the current build spec - these are your instructions
-2. Reference `docs/research/` for design rationale (especially `008-database-design.md` for schema details)
+1. Check `docs/implementation/` for build specs
+2. Reference `docs/research/` for design rationale
 3. Reference `docs/features/` for high-level feature context
+4. Check `docs/features/INDEX.md` for current status of everything
 
 ### Tech Stack
 
-- **Python 3.12+**
+- **Python 3.12+** (3.14 in container)
 - **PostgreSQL 17** with pgvector extension
 - **SQLAlchemy 2.0+** (async, declarative ORM)
 - **asyncpg** (async Postgres driver)
 - **pydantic v2** + pydantic-settings for config
+- **Starlette** for REST API
+- **httpx** for HTTP clients (Anthropic API, Telegram, etc.)
 - **pytest** + pytest-asyncio for tests
+- **uv** for dependency management
 
 ### Key Principles
 
-- **Brain and Heart are in-process Python modules** - no MCP, no HTTP between them. Direct function calls, shared connection pool.
-- **MCP is only the external interface** - for other agents/tools to talk to Nous.
-- **Same ideas as Cognition Engines, not same code** - CE proved the concepts, Nous reimplements natively.
-- **Async everywhere** - all database operations use async/await.
-- **pgvector for all embeddings** - unified semantic search, no separate vector DB.
-- **HNSW indexes over ivfflat** - works on empty tables, better recall.
+- **Brain and Heart are in-process Python modules** — no MCP, no HTTP between them. Direct function calls, shared connection pool.
+- **MCP is only the external interface** — for other agents/tools to talk to Nous.
+- **Same ideas as Cognition Engines, not same code** — CE proved the concepts, Nous reimplements natively.
+- **Direct Anthropic API** — no SDK wrapper. httpx calls with internal tool dispatch loop.
+- **Async everywhere** — all database operations use async/await.
+- **pgvector for all embeddings** — unified semantic search, no separate vector DB.
+- **HNSW indexes over ivfflat** — works on empty tables, better recall.
+- **OAT token support** — Max subscription tokens use Bearer auth + beta headers.
 
 ### Database
 
-- Three schemas: `brain`, `heart`, `system`
+- Three schemas: `brain`, `heart`, `system` (18 tables total)
 - All tables are agent-scoped (`agent_id` column) for multi-agent readiness
 - Use `vector(1536)` for embeddings (text-embedding-3-small)
 - Full-text search via `tsvector` + GIN indexes
@@ -86,17 +150,20 @@ nous/
 ### Running
 
 ```bash
-# Start Postgres
+# Full stack (Nous + Postgres)
+docker compose up -d
+
+# Just Postgres (for local dev)
 docker compose up -d postgres
 
 # Install dependencies
-pip install -e ".[dev]"
+uv sync
 
 # Run tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
-# Start Nous (when ready)
-python -m nous.main
+# Start Nous locally
+uv run python -m nous.main
 ```
 
 ### Environment Variables
@@ -105,15 +172,21 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_HOST` | `localhost` | Database host (shared with docker-compose) |
-| `DB_PORT` | `5432` | Database port (shared with docker-compose) |
-| `DB_USER` | `nous` | Database user (shared with docker-compose) |
-| `DB_PASSWORD` | `nous_dev_password` | Database password (shared with docker-compose) |
-| `DB_NAME` | `nous` | Database name (shared with docker-compose) |
-| `NOUS_DB_POOL_SIZE` | `10` | Connection pool size |
+| `DB_HOST` | `localhost` | Database host |
+| `DB_PORT` | `5432` | Database port |
+| `DB_USER` | `nous` | Database user |
+| `DB_PASSWORD` | `nous_dev_password` | Database password |
+| `DB_NAME` | `nous` | Database name |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key |
+| `ANTHROPIC_AUTH_TOKEN` | — | OAT token (Max subscription, uses Bearer auth) |
 | `NOUS_AGENT_ID` | `nous-default` | Agent identifier |
-| `NOUS_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
+| `NOUS_AGENT_NAME` | `Nous` | Agent display name |
+| `NOUS_MODEL` | `claude-sonnet-4-5-20250514` | LLM model for chat |
+| `NOUS_MAX_TURNS` | `10` | Max tool loop iterations |
+| `NOUS_MCP_ENABLED` | `true` | Enable MCP server |
 | `NOUS_LOG_LEVEL` | `info` | Log level |
+| `BRAVE_SEARCH_API_KEY` | — | For web_search tool |
+| `OPENAI_API_KEY` | — | For embeddings (text-embedding-3-small) |
 | `NOUS_EVENT_BUS_ENABLED` | `true` | Enable async event bus |
 | `NOUS_EPISODE_SUMMARY_ENABLED` | `true` | Enable episode summarization handler |
 | `NOUS_FACT_EXTRACTION_ENABLED` | `true` | Enable fact extraction handler |
@@ -123,33 +196,49 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | `NOUS_SLEEP_TIMEOUT` | `7200` | Sleep mode timeout in seconds |
 | `NOUS_SLEEP_CHECK_INTERVAL` | `60` | Sleep check interval in seconds |
 
-## Implementation Specs
+### REST Endpoints
 
-Build specs live in `docs/implementation/` and are numbered sequentially:
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/chat` | Send message, get response |
+| POST | `/chat/stream` | SSE streaming chat |
+| DELETE | `/chat/{session_id}` | End conversation |
+| GET | `/status` | Agent status + memory stats + calibration |
+| GET | `/decisions` | List recent decisions |
+| GET | `/decisions/{id}` | Decision detail |
+| GET | `/episodes` | List recent episodes |
+| GET | `/facts?q=query` | Search facts |
+| GET | `/censors` | Active censors |
+| GET | `/frames` | Available cognitive frames |
+| GET | `/calibration` | Calibration report |
+| GET | `/health` | Health check |
 
-| # | Name | Description | Status |
-|---|------|-------------|--------|
-| 001 | [Postgres Scaffold](docs/implementation/001-postgres-scaffold.md) | DB schema + Python project setup | Ready |
+### Agent Tools
 
-**Each spec contains:**
-- Exact deliverables with code snippets
-- Acceptance criteria (pass/fail)
-- Test requirements
-- Non-goals (what NOT to build)
-- References to research/feature docs
-
-**Follow the spec.** If something is ambiguous, check the referenced research notes. If still unclear, ask.
+| Tool | Frame Access | Description |
+|------|-------------|-------------|
+| `record_decision` | decision, task, debug, conversation, question | Record a decision with confidence + reasoning |
+| `recall_deep` | all | Search memory (decisions, facts, episodes) |
+| `learn_fact` | conversation, question, creative, task | Store a new fact |
+| `create_censor` | all | Create a guardrail censor |
+| `bash` | task, debug, conversation, question | Execute shell commands |
+| `read_file` | task, debug, question | Read file contents |
+| `write_file` | task, creative | Write/create files |
+| `web_search` | all | Search via Brave API |
+| `web_fetch` | all | Fetch and extract web content |
 
 ## Git Workflow
 
 - Work on feature branches, not main
 - Commit messages: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`
-- Keep commits focused - one logical change per commit
+- Keep commits focused — one logical change per commit
+- All PRs need code review before merge
 
 ## References
 
-- [Society of Mind](docs/research/002-minsky-mapping.md) - How Minsky maps to Nous
-- [Database Design](docs/research/008-database-design.md) - Complete SQL for all 17 tables
-- [Storage Architecture](docs/research/004-storage-architecture.md) - Why Postgres + pgvector
-- [Cognitive Layer](docs/research/005-cognitive-layer.md) - The seven systems
-- [Automation Pipeline](docs/research/012-automation-pipeline.md) - Event bus design
+- [Feature Index](docs/features/INDEX.md) — Current status of all features
+- [Society of Mind](docs/research/002-minsky-mapping.md) — How Minsky maps to Nous
+- [Database Design](docs/research/008-database-design.md) — Complete SQL for all tables
+- [Storage Architecture](docs/research/004-storage-architecture.md) — Why Postgres + pgvector
+- [Cognitive Layer](docs/research/005-cognitive-layer.md) — The seven systems
+- [Automation Pipeline](docs/research/012-automation-pipeline.md) — Event bus design

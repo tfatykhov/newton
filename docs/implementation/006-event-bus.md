@@ -1,9 +1,8 @@
 # 006 Event Bus — In-Process Async Event System
 
-**Status:** PLANNED
+**Status:** Shipped
 **Priority:** P0 — Foundation for F010, F007, F008, F009
 **Prerequisites:** 004 (Cognitive Layer), 005.2 (Runtime)
-**Estimated Effort:** 3-4 hours
 **Branch:** `feat/006-event-bus`
 
 ## Problem
