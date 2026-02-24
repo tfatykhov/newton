@@ -36,18 +36,38 @@ TG_MAX_LEN = 4096
 class StreamingMessage:
     """Manages progressive message editing for Telegram streaming."""
 
+    # Tool name -> (emoji, display label)
+    TOOL_INDICATORS: dict[str, tuple[str, str]] = {
+        "web_search": ("\U0001f50d", "Searching"),
+        "web_fetch": ("\U0001f310", "Fetching"),
+        "recall_deep": ("\U0001f9e0", "Remembering"),
+        "record_decision": ("\U0001f4dd", "Recording"),
+        "learn_fact": ("\U0001f4a1", "Learning"),
+        "bash": ("\u2699\ufe0f", "Running"),
+        "read_file": ("\U0001f4c4", "Reading"),
+        "write_file": ("\u270f\ufe0f", "Writing"),
+    }
+
     def __init__(self, bot: NousTelegramBot, chat_id: int):
         self._bot = bot
         self.chat_id = chat_id
         self.message_id: int | None = None
         self.text = ""
+        self._base_text = ""  # Text without tool indicators
+        self._tool_counts: dict[str, int] = {}  # tool_name -> count
         self._last_edit = 0.0
         self._min_interval = 1.2  # N6: ~20 edits/msg limit
         self._pending = False
+        self._usage: dict[str, int] | None = None  # Token usage stats
+
+    def set_usage(self, usage: dict[str, int]) -> None:
+        """Set token usage for the footer."""
+        self._usage = usage
 
     async def update(self, new_text: str) -> None:
         """Update message text. Creates on first call, edits after."""
-        self.text = new_text
+        self._base_text = new_text
+        self.text = self._build_display_text()
         now = time.time()
         if now - self._last_edit < self._min_interval:
             self._pending = True
@@ -55,23 +75,43 @@ class StreamingMessage:
         await self._send_or_edit()
 
     async def append_tool_indicator(self, tool_name: str) -> None:
-        """Add tool usage indicator."""
-        indicators = {
-            "web_search": "\U0001f50d Searching...",
-            "web_fetch": "\U0001f310 Fetching...",
-            "recall_deep": "\U0001f9e0 Remembering...",
-            "record_decision": "\U0001f4dd Recording...",
-            "learn_fact": "\U0001f4a1 Learning...",
-            "bash": "\u2699\ufe0f Running...",
-            "read_file": "\U0001f4c4 Reading...",
-            "write_file": "\u270f\ufe0f Writing...",
-        }
-        indicator = indicators.get(tool_name, f"\U0001f527 {tool_name}...")
-        self.text += f"\n\n{indicator}"
+        """Track tool usage with grouped counters instead of appending lines."""
+        self._tool_counts[tool_name] = self._tool_counts.get(tool_name, 0) + 1
+        self.text = self._build_display_text()
         await self._send_or_edit()
 
+    def _build_display_text(self) -> str:
+        """Build display text: base text + collapsed tool indicators + usage footer."""
+        parts = [self._base_text] if self._base_text else []
+
+        if self._tool_counts:
+            indicators: list[str] = []
+            for tool_name, count in self._tool_counts.items():
+                emoji, label = self.TOOL_INDICATORS.get(
+                    tool_name, ("\U0001f527", tool_name)
+                )
+                if count > 1:
+                    indicators.append(f"{emoji} {label}... ({count})")
+                else:
+                    indicators.append(f"{emoji} {label}...")
+            parts.append(" ".join(indicators))
+
+        return "\n\n".join(parts)
+
     async def finalize(self) -> None:
-        """Send final version of message."""
+        """Send final version of message with usage footer."""
+        # Clear tool indicators for final message, keep only base text + footer
+        self._tool_counts.clear()
+        self.text = self._build_display_text()
+
+        # Append usage footer if available
+        if self._usage:
+            inp = self._usage.get("input_tokens", 0)
+            out = self._usage.get("output_tokens", 0)
+            inp_str = f"{inp / 1000:.1f}K" if inp >= 1000 else str(inp)
+            out_str = f"{out / 1000:.1f}K" if out >= 1000 else str(out)
+            self.text += f"\n\n\U0001f4ca {inp_str} in / {out_str} out"
+
         if self._pending or self.message_id is None:
             await self._send_or_edit()
 
@@ -247,6 +287,15 @@ class NousTelegramBot:
                 )
                 reply += debug_text
 
+            # Add usage footer if available
+            usage = data.get("usage")
+            if usage:
+                inp = usage.get("input_tokens", 0)
+                out = usage.get("output_tokens", 0)
+                inp_str = f"{inp / 1000:.1f}K" if inp >= 1000 else str(inp)
+                out_str = f"{out / 1000:.1f}K" if out >= 1000 else str(out)
+                reply += f"\n\n\U0001f4ca {inp_str} in / {out_str} out"
+
             # Split long messages
             full_reply = f"{frame_tag}\n\n{reply}"
             await self._send_long(chat_id, full_reply)
@@ -297,14 +346,16 @@ class NousTelegramBot:
                     event = json.loads(line[6:])
 
                     if event.get("type") == "text_delta":
-                        streamer.text += event.get("text", "")
-                        await streamer.update(streamer.text)
+                        streamer._base_text += event.get("text", "")
+                        await streamer.update(streamer._base_text)
                     elif event.get("type") == "tool_start":
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
                     elif event.get("type") == "error":
                         await self._send(chat_id, f"\u274c {event.get('text', 'Unknown error')}")
                         return
                     elif event.get("type") == "done":
+                        if event.get("usage"):
+                            streamer.set_usage(event["usage"])
                         break
 
         except httpx.TimeoutException:

@@ -114,7 +114,7 @@ async def runner(mock_cognitive, mock_settings):
     r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
 
     # Mock _tool_loop to return a simple text response with no tool calls
-    r._tool_loop = AsyncMock(return_value=("Hello from Nous!", []))
+    r._tool_loop = AsyncMock(return_value=("Hello from Nous!", [], {"input_tokens": 100, "output_tokens": 50}))
 
     yield r
     await r.close()
@@ -142,7 +142,7 @@ async def runner_error(mock_cognitive, mock_settings):
 async def test_run_turn_basic(runner, mock_cognitive):
     """Sends message, gets response, returns (text, context)."""
     session_id = f"test-{uuid.uuid4().hex[:8]}"
-    response_text, turn_context = await runner.run_turn(session_id, "Hello!")
+    response_text, turn_context, _usage = await runner.run_turn(session_id, "Hello!")
 
     assert response_text == "Hello from Nous!"
     assert isinstance(turn_context, TurnContext)
@@ -204,7 +204,7 @@ async def test_run_turn_calls_post_turn(runner, mock_cognitive):
 async def test_run_turn_api_error(runner_error, mock_cognitive):
     """API error -> error message returned, post_turn still called with error."""
     session_id = f"test-{uuid.uuid4().hex[:8]}"
-    response_text, turn_context = await runner_error.run_turn(session_id, "Hello!")
+    response_text, turn_context, _usage = await runner_error.run_turn(session_id, "Hello!")
 
     # Should return error fallback message
     assert "error" in response_text.lower()
@@ -254,11 +254,11 @@ async def test_run_turn_with_tool_calls(mock_cognitive, mock_settings):
             result="Fact learned successfully.\nID: def456",
         ),
     ]
-    r._tool_loop = AsyncMock(return_value=("Done with tools.", tool_results))
+    r._tool_loop = AsyncMock(return_value=("Done with tools.", tool_results, {"input_tokens": 200, "output_tokens": 100}))
 
     try:
         session_id = f"test-tools-{uuid.uuid4().hex[:8]}"
-        response_text, _ = await r.run_turn(session_id, "Do something with tools")
+        response_text, _, _usage = await r.run_turn(session_id, "Do something with tools")
 
         assert response_text == "Done with tools."
 
@@ -288,11 +288,11 @@ async def test_run_turn_with_tool_error(mock_cognitive, mock_settings):
             error="Error recording decision: validation failed",
         ),
     ]
-    r._tool_loop = AsyncMock(return_value=("Tool had an error.", tool_results))
+    r._tool_loop = AsyncMock(return_value=("Tool had an error.", tool_results, {"input_tokens": 200, "output_tokens": 100}))
 
     try:
         session_id = f"test-tool-err-{uuid.uuid4().hex[:8]}"
-        response_text, _ = await r.run_turn(session_id, "Try something broken")
+        response_text, _, _usage = await r.run_turn(session_id, "Try something broken")
 
         assert len(mock_cognitive.post_turn_calls) == 1
         _, _, turn_result, _ = mock_cognitive.post_turn_calls[0]
@@ -331,7 +331,7 @@ async def test_run_turn_frame_instructions(mock_cognitive, mock_settings):
         context_token_estimate=100,
     )
 
-    r._tool_loop = AsyncMock(return_value=("Decision made.", []))
+    r._tool_loop = AsyncMock(return_value=("Decision made.", [], {"input_tokens": 100, "output_tokens": 50}))
 
     try:
         session_id = f"test-frame-{uuid.uuid4().hex[:8]}"
@@ -368,7 +368,7 @@ async def test_run_turn_safety_net(mock_cognitive, mock_settings, caplog):
     )
 
     # Return response with NO tool calls (record_decision not called)
-    r._tool_loop = AsyncMock(return_value=("I decided to use caching.", []))
+    r._tool_loop = AsyncMock(return_value=("I decided to use caching.", [], {"input_tokens": 100, "output_tokens": 50}))
 
     try:
         session_id = f"test-safety-{uuid.uuid4().hex[:8]}"
@@ -540,7 +540,7 @@ async def test_lru_eviction(mock_cognitive, mock_settings):
     brain = MockBrain()
     heart = MockHeart()
     r = AgentRunner(mock_cognitive, brain, heart, mock_settings)
-    r._tool_loop = AsyncMock(return_value=("OK", []))
+    r._tool_loop = AsyncMock(return_value=("OK", [], {"input_tokens": 100, "output_tokens": 50}))
 
     try:
         # Create MAX_CONVERSATIONS + 1 conversations
