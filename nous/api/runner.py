@@ -83,6 +83,7 @@ class StreamEvent:
     tool_input: dict = field(default_factory=dict)
     stop_reason: str = ""
     block_index: int = 0
+    usage: dict[str, int] | None = None
 
 
 def _parse_sse_event(data: dict[str, Any]) -> StreamEvent | None:
@@ -133,10 +134,16 @@ def _parse_sse_event(data: dict[str, Any]) -> StreamEvent | None:
         return StreamEvent(type="block_stop", block_index=data.get("index", 0))
 
     if event_type == "message_delta":
+        usage = data.get("usage")
         return StreamEvent(
             type="done",
             stop_reason=data.get("delta", {}).get("stop_reason", ""),
+            usage=usage,
         )
+
+    if event_type == "message_start":
+        usage = data.get("message", {}).get("usage")
+        return StreamEvent(type="message_start", usage=usage)
 
     if event_type == "message_stop":
         return StreamEvent(type="message_stop")
@@ -250,7 +257,7 @@ class AgentRunner:
         agent_id: str | None = None,
         user_id: str | None = None,
         user_display_name: str | None = None,
-    ) -> tuple[str, TurnContext]:
+    ) -> tuple[str, TurnContext, dict[str, int]]:
         """Execute a single conversational turn.
 
         Steps:
@@ -288,10 +295,11 @@ class AgentRunner:
         # 4-6. Build system prompt and run tool loop
         response_text = ""
         tool_results: list[ToolResult] = []
+        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         error = None
         try:
             system_prompt = self._build_system_prompt(turn_context)
-            response_text, tool_results = await self._tool_loop(
+            response_text, tool_results, usage = await self._tool_loop(
                 system_prompt=system_prompt,
                 conversation=conversation,
                 frame_id=turn_context.frame.frame_id,
@@ -317,7 +325,7 @@ class AgentRunner:
         # Store context
         conversation.turn_contexts.append(turn_context)
 
-        return response_text, turn_context
+        return response_text, turn_context, usage
 
     async def end_conversation(self, session_id: str, agent_id: str | None = None) -> None:
         """End a conversation with reflection.
@@ -536,6 +544,7 @@ class AgentRunner:
         messages = self._format_messages(conversation)
 
         all_tool_results: list[ToolResult] = []
+        total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         response_text = ""
         error = None
 
@@ -555,6 +564,10 @@ class AgentRunner:
                         error = event.text
                         yield event
                         return
+
+                    elif event.type == "message_start":
+                        if event.usage:
+                            total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
 
                     elif event.type == "text_delta":
                         text_parts.append(event.text)
@@ -585,6 +598,9 @@ class AgentRunner:
 
                     elif event.type == "done":
                         stop_reason = event.stop_reason
+                        if event.usage:
+                            total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
+                            total_usage["output_tokens"] += event.usage.get("output_tokens", 0)
 
                 # Stream segment ended -- decide next action
                 if stop_reason == "end_turn" or not tool_calls:
@@ -668,7 +684,7 @@ class AgentRunner:
             self._check_safety_net(turn_context, all_tool_results)
             conversation.turn_contexts.append(turn_context)
 
-        yield StreamEvent(type="done", stop_reason="end_turn")
+        yield StreamEvent(type="done", stop_reason="end_turn", usage=total_usage)
 
     # ------------------------------------------------------------------
     # Tool loop
@@ -679,10 +695,10 @@ class AgentRunner:
         system_prompt: str,
         conversation: Conversation,
         frame_id: str,
-    ) -> tuple[str, list[ToolResult]]:
+    ) -> tuple[str, list[ToolResult], dict[str, int]]:
         """Run the tool use loop until completion or max_turns.
 
-        Returns (response_text, tool_results).
+        Returns (response_text, tool_results, usage).
 
         The loop:
         1. Build messages array from conversation
@@ -702,6 +718,7 @@ class AgentRunner:
         messages = self._format_messages(conversation)
 
         all_tool_results: list[ToolResult] = []
+        total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         turns = 0
         max_turns = self._settings.max_turns
 
@@ -712,10 +729,15 @@ class AgentRunner:
                 tools=tools if tools else None,
             )
 
+            # Accumulate usage
+            if api_response.usage:
+                total_usage["input_tokens"] += api_response.usage.get("input_tokens", 0)
+                total_usage["output_tokens"] += api_response.usage.get("output_tokens", 0)
+
             # If not a tool use, we're done
             if api_response.stop_reason != "tool_use":
                 response_text = self._extract_text(api_response.content)
-                return response_text, all_tool_results
+                return response_text, all_tool_results, total_usage
 
             # P0-3: Append FULL assistant response (all content blocks)
             messages.append({
@@ -770,9 +792,12 @@ class AgentRunner:
                 messages=messages,
                 tools=None,
             )
-            return self._extract_text(final_response.content), all_tool_results
+            if final_response.usage:
+                total_usage["input_tokens"] += final_response.usage.get("input_tokens", 0)
+                total_usage["output_tokens"] += final_response.usage.get("output_tokens", 0)
+            return self._extract_text(final_response.content), all_tool_results, total_usage
         except Exception:
-            return "I reached the maximum number of tool iterations. Please try again.", all_tool_results
+            return "I reached the maximum number of tool iterations. Please try again.", all_tool_results, total_usage
 
     # ------------------------------------------------------------------
     # Internal helpers

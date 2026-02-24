@@ -62,12 +62,13 @@ def create_app(
 
         try:
             debug = body.get("debug", False)
-            response_text, turn_context = await runner.run_turn(session_id, message)
+            response_text, turn_context, usage = await runner.run_turn(session_id, message)
             result: dict[str, Any] = {
                 "response": response_text,
                 "session_id": session_id,
                 "frame": turn_context.frame.frame_id,
                 "decision_id": turn_context.decision_id,
+                "usage": usage,
             }
             if debug:
                 result["debug"] = {
@@ -100,12 +101,15 @@ def create_app(
         async def event_generator():
             try:
                 async for event in runner.stream_chat(session_id, message):
-                    data = json.dumps({
+                    event_data: dict[str, Any] = {
                         "type": event.type,
                         "text": event.text,
                         "tool_name": event.tool_name,
                         "stop_reason": event.stop_reason,
-                    })
+                    }
+                    if event.usage:
+                        event_data["usage"] = event.usage
+                    data = json.dumps(event_data)
                     yield f"data: {data}\n\n"
             except Exception as e:
                 logger.error("Stream error: %s", e)

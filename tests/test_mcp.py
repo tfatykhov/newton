@@ -42,7 +42,7 @@ class MockAgentRunner:
 
     async def run_turn(self, session_id, user_message, agent_id=None):
         self.run_turn_calls.append((session_id, user_message, agent_id))
-        return self.preset_response, self.preset_context
+        return self.preset_response, self.preset_context, {"input_tokens": 100, "output_tokens": 50}
 
 
 # ---------------------------------------------------------------------------

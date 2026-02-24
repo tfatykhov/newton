@@ -267,6 +267,7 @@ class TestStreamEvent:
         assert event.tool_input == {}
         assert event.stop_reason == ""
         assert event.block_index == 0
+        assert event.usage is None
 
     def test_all_fields(self):
         """All fields set correctly."""
@@ -753,8 +754,8 @@ class TestStreamingMessage:
         )
 
     @pytest.mark.asyncio
-    async def test_tool_indicator_appended(self):
-        """Tool indicator text added correctly."""
+    async def test_tool_indicator_grouped(self):
+        """Tool indicators are grouped with counts instead of appended."""
         bot = self._make_bot()
         sm = StreamingMessage(bot, chat_id=123)
 
@@ -762,11 +763,58 @@ class TestStreamingMessage:
         with patch("time.time", return_value=1000.0):
             await sm.update("Thinking")
 
-        # Append tool indicator (always sends immediately)
-        with patch("time.time", return_value=1000.1):
-            await sm.append_tool_indicator("web_search")
+        # Append same tool indicator multiple times
+        with patch("time.time", return_value=1002.0):
+            await sm.append_tool_indicator("bash")
+        with patch("time.time", return_value=1004.0):
+            await sm.append_tool_indicator("bash")
+        with patch("time.time", return_value=1006.0):
+            await sm.append_tool_indicator("bash")
 
-        assert "Searching" in sm.text
+        assert "Running... (3)" in sm.text
+        # Should NOT have 3 separate lines
+        assert sm.text.count("Running") == 1
+
+    @pytest.mark.asyncio
+    async def test_tool_indicator_mixed_types(self):
+        """Different tool types shown separately."""
+        bot = self._make_bot()
+        sm = StreamingMessage(bot, chat_id=123)
+
+        with patch("time.time", return_value=1000.0):
+            await sm.update("Working")
+
+        with patch("time.time", return_value=1002.0):
+            await sm.append_tool_indicator("web_search")
+        with patch("time.time", return_value=1004.0):
+            await sm.append_tool_indicator("bash")
+        with patch("time.time", return_value=1006.0):
+            await sm.append_tool_indicator("bash")
+
+        assert "Searching..." in sm.text
+        assert "Running... (2)" in sm.text
+
+    @pytest.mark.asyncio
+    async def test_finalize_clears_indicators_adds_usage(self):
+        """Finalize removes tool indicators and adds usage footer."""
+        bot = self._make_bot()
+        sm = StreamingMessage(bot, chat_id=123)
+
+        with patch("time.time", return_value=1000.0):
+            await sm.update("Result")
+
+        with patch("time.time", return_value=1002.0):
+            await sm.append_tool_indicator("bash")
+
+        sm.set_usage({"input_tokens": 2847, "output_tokens": 512})
+
+        with patch("time.time", return_value=1004.0):
+            await sm.finalize()
+
+        # Tool indicators should be gone
+        assert "Running" not in sm.text
+        # Usage footer should be present
+        assert "2.8K in / 512 out" in sm.text
 
     @pytest.mark.asyncio
     async def test_overflow_splits_message(self):

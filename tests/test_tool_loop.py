@@ -156,7 +156,7 @@ class TestToolLoop:
         ))
 
         conv = _make_conversation([("user", "Hello")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
@@ -182,7 +182,7 @@ class TestToolLoop:
         loop_runner._call_api = AsyncMock(side_effect=[tool_response, final_response])
 
         conv = _make_conversation([("user", "Use a tool")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
@@ -215,7 +215,7 @@ class TestToolLoop:
         )
 
         conv = _make_conversation([("user", "Keep using tools")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
@@ -237,7 +237,7 @@ class TestToolLoop:
         ))
 
         conv = _make_conversation([("user", "Long request")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
@@ -266,7 +266,7 @@ class TestToolLoop:
         loop_runner._call_api = AsyncMock(side_effect=[parallel_response, final_response])
 
         conv = _make_conversation([("user", "Use both tools")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
@@ -355,7 +355,7 @@ class TestToolLoop:
         loop_runner._call_api = AsyncMock(side_effect=[unknown_tool_response, final_response])
 
         conv = _make_conversation([("user", "Call unknown tool")])
-        response_text, tool_results = await loop_runner._tool_loop(
+        response_text, tool_results, _usage = await loop_runner._tool_loop(
             system_prompt="Test prompt",
             conversation=conv,
             frame_id="task",
