@@ -9,7 +9,7 @@ Tests cover:
 
 import pytest
 
-from nous.telegram_bot import format_telegram_html, sanitize_telegram, _strip_html_tags
+from nous.telegram_bot import format_telegram_html, sanitize_telegram, _strip_html_tags, StreamingMessage
 
 
 class TestSanitizeTelegram:
@@ -374,3 +374,162 @@ class TestDebugSystemPromptEncoding:
         assert "&lt;" in result
         assert "&gt;" in result
         assert "&amp;" in result
+
+
+class TestStreamingMessageThinking:
+    """Tests for thinking indicator display in StreamingMessage (#48, spec 007.1)."""
+
+    def _make_streamer(self):
+        """Create a StreamingMessage with a mock bot for testing display logic."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        bot = MagicMock()
+        bot._send = AsyncMock(return_value={"message_id": 1})
+        bot._tg = AsyncMock(return_value={})
+        streamer = StreamingMessage(bot, chat_id=123)
+        # Override interval so tests don't skip edits
+        streamer._min_interval = 0
+        return streamer
+
+    def test_initial_thinking_state(self):
+        """Thinking state starts at zero/empty."""
+        streamer = self._make_streamer()
+        assert streamer._thinking_text == ""
+        assert streamer._thinking_count == 0
+        assert streamer._thinking_displayed is False
+
+    @pytest.mark.asyncio
+    async def test_start_thinking_increments_count(self):
+        """start_thinking increments count and resets text."""
+        streamer = self._make_streamer()
+        await streamer.start_thinking()
+        assert streamer._thinking_count == 1
+        assert streamer._thinking_text == ""
+        assert streamer._thinking_displayed is False
+
+    @pytest.mark.asyncio
+    async def test_append_thinking_accumulates(self):
+        """append_thinking accumulates text."""
+        streamer = self._make_streamer()
+        await streamer.start_thinking()
+        await streamer.append_thinking("Let me ")
+        await streamer.append_thinking("analyze this")
+        assert streamer._thinking_text == "Let me analyze this"
+
+    @pytest.mark.asyncio
+    async def test_thinking_not_displayed_under_threshold(self):
+        """Thinking preview not shown until 50 chars accumulated."""
+        streamer = self._make_streamer()
+        await streamer.start_thinking()
+        await streamer.append_thinking("Short text")  # 10 chars
+        assert streamer._thinking_displayed is False
+
+    @pytest.mark.asyncio
+    async def test_thinking_displayed_over_threshold(self):
+        """Thinking preview shown after 50+ chars accumulated."""
+        streamer = self._make_streamer()
+        await streamer.start_thinking()
+        await streamer.append_thinking("A" * 60)
+        assert streamer._thinking_displayed is True
+
+    def test_build_display_single_thinking(self):
+        """Single thinking block shows preview without count."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = "Let me analyze the current state of the system"
+        result = streamer._build_display_text()
+        assert "\U0001f4ad" in result
+        assert "Let me analyze the current state of the system" in result
+        assert "Thinking (" not in result  # no count for single block
+
+    def test_build_display_multiple_thinking(self):
+        """Multiple thinking blocks show count."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 3
+        streamer._thinking_text = "Final thinking block content here"
+        result = streamer._build_display_text()
+        assert "Thinking (3):" in result
+
+    def test_build_display_thinking_truncated(self):
+        """Long thinking text truncated at 100 chars with ellipsis."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = "A" * 150
+        result = streamer._build_display_text()
+        assert "A" * 100 + "..." in result
+
+    def test_build_display_thinking_with_text(self):
+        """Thinking indicator appears before base text."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = "Analyzing the problem carefully here for testing"
+        streamer._base_text = "Here is my response."
+        result = streamer._build_display_text()
+        thinking_pos = result.find("\U0001f4ad")
+        response_pos = result.find("Here is my response.")
+        assert thinking_pos < response_pos
+
+    def test_build_display_no_thinking(self):
+        """No thinking state means no thinking indicator."""
+        streamer = self._make_streamer()
+        streamer._base_text = "Just a response"
+        result = streamer._build_display_text()
+        assert "\U0001f4ad" not in result
+        assert result == "Just a response"
+
+    def test_build_display_thinking_newlines_replaced(self):
+        """Newlines in thinking text replaced with spaces for preview."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = "Line one\nLine two\nLine three"
+        result = streamer._build_display_text()
+        assert "\n" not in result.split("\n\n")[0]  # thinking part has no internal newlines
+
+    @pytest.mark.asyncio
+    async def test_finalize_with_thinking_summary(self):
+        """Finalize includes thinking summary before response text."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = "Let me analyze the procedures table and check results"
+        streamer._base_text = "The answer is 42."
+        streamer._usage = {"input_tokens": 8200, "output_tokens": 943}
+        await streamer.finalize()
+        # Thinking should be in the final text
+        assert "\U0001f4ad" in streamer.text
+        assert "The answer is 42." in streamer.text
+        assert "8.2K in" in streamer.text
+
+    @pytest.mark.asyncio
+    async def test_finalize_redacted_thinking(self):
+        """Finalize shows redacted message when thinking has no content."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 1
+        streamer._thinking_text = ""  # redacted — no content
+        streamer._base_text = "Response text."
+        await streamer.finalize()
+        assert "redacted" in streamer.text
+
+    @pytest.mark.asyncio
+    async def test_finalize_with_tools_and_thinking(self):
+        """Finalize shows thinking summary + tool count + response."""
+        streamer = self._make_streamer()
+        streamer._thinking_count = 2
+        streamer._thinking_text = "Second thinking block about the search results analysis"
+        streamer._base_text = "Found the answer."
+        streamer._tool_counts = {"web_search": 2, "recall_deep": 1}
+        await streamer.finalize()
+        assert "\U0001f4ad" in streamer.text
+        assert "Ran 3 tools" in streamer.text
+        assert "Found the answer." in streamer.text
+
+    @pytest.mark.asyncio
+    async def test_multiple_thinking_blocks_reset(self):
+        """Each start_thinking resets text for the new block."""
+        streamer = self._make_streamer()
+        await streamer.start_thinking()
+        await streamer.append_thinking("First block content")
+        await streamer.start_thinking()
+        assert streamer._thinking_count == 2
+        assert streamer._thinking_text == ""  # reset for new block
+        await streamer.append_thinking("Second block content")
+        assert streamer._thinking_text == "Second block content"
