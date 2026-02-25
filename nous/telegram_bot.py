@@ -35,6 +35,7 @@ TG_MAX_LEN = 4096
 # Regex patterns for markdown sanitization
 import re
 
+_FENCED_BLOCK_RE = re.compile(r"```[\s\S]*?```", re.MULTILINE)
 _TABLE_SEP_RE = re.compile(r"^\|[-:| ]+\|$", re.MULTILINE)  # |---|---|
 _TABLE_ROW_RE = re.compile(r"^\|(.+)\|$", re.MULTILINE)  # | col | col |
 _HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)  # ## Header
@@ -48,7 +49,17 @@ def sanitize_telegram(text: str) -> str:
     - Markdown tables → bullet lists
     - ## Headers → **bold**
     - --- horizontal rules → removed
+    - Fenced code blocks are preserved (not sanitized).
     """
+    # Stash fenced code blocks to protect them from sanitization
+    stash: list[str] = []
+
+    def _stash_block(match: re.Match) -> str:
+        stash.append(match.group(0))
+        return f"\x00CODEBLOCK{len(stash) - 1}\x00"
+
+    text = _FENCED_BLOCK_RE.sub(_stash_block, text)
+
     # Remove table separator rows first
     text = _TABLE_SEP_RE.sub("", text)
 
@@ -60,7 +71,7 @@ def sanitize_telegram(text: str) -> str:
         elif len(cells) == 2:
             return f"• {cells[0]} — {cells[1]}"
         else:
-            return "• " + " | ".join(cells)
+            return "• " + " — ".join(cells)
 
     text = _TABLE_ROW_RE.sub(_table_row_to_bullet, text)
 
@@ -72,6 +83,10 @@ def sanitize_telegram(text: str) -> str:
 
     # Clean up excessive blank lines left by removals
     text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Restore fenced code blocks
+    for i, block in enumerate(stash):
+        text = text.replace(f"\x00CODEBLOCK{i}\x00", block)
 
     return text.strip()
 
@@ -307,8 +322,8 @@ class NousTelegramBot:
             if "session_id" in data:
                 self._sessions[chat_id] = data["session_id"]
 
-            # Build response text
-            reply = data.get("response", "No response")
+            # Build response text (sanitize LLM output for Telegram)
+            reply = sanitize_telegram(data.get("response", "No response"))
             frame = data.get("frame", "unknown")
 
             # Add frame indicator
@@ -414,7 +429,6 @@ class NousTelegramBot:
 
     async def _send(self, chat_id: int, text: str, parse_mode: str | None = None) -> dict:
         """Send a message to Telegram."""
-        text = sanitize_telegram(text)
         params: dict[str, Any] = {"chat_id": chat_id, "text": text}
         if parse_mode:
             params["parse_mode"] = parse_mode

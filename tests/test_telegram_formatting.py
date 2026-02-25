@@ -34,10 +34,11 @@ class TestSanitizeTelegram:
         assert "• Just one column" in result
 
     def test_three_column_table(self):
-        """Three+ column rows join with pipe."""
+        """Three+ column rows join with em dash."""
         text = "| A | B | C |"
         result = sanitize_telegram(text)
         assert "•" in result
+        assert "|" not in result
         assert "A" in result
         assert "B" in result
         assert "C" in result
@@ -81,6 +82,39 @@ class TestSanitizeTelegram:
         text = "```python\nprint('hello')\n```"
         result = sanitize_telegram(text)
         assert "```python" in result
+
+    def test_table_inside_code_block_preserved(self):
+        """Tables inside fenced code blocks are NOT sanitized."""
+        text = "```\n| col1 | col2 |\n|------|------|\n| a    | b    |\n```"
+        result = sanitize_telegram(text)
+        assert "| col1 | col2 |" in result
+        assert "|------|------|" in result
+
+    def test_header_inside_code_block_preserved(self):
+        """Headers inside fenced code blocks are NOT sanitized."""
+        text = "```markdown\n## My Header\n```"
+        result = sanitize_telegram(text)
+        assert "## My Header" in result
+        assert "**My Header**" not in result
+
+    def test_mixed_code_and_tables(self):
+        """Code blocks preserved while tables outside are sanitized."""
+        text = (
+            "## Status\n"
+            "| Feature | Done |\n"
+            "|---------|------|\n"
+            "| Brain | Yes |\n\n"
+            "```sql\n"
+            "SELECT * FROM brain.decisions\n"
+            "WHERE status = 'pending'\n"
+            "```\n\n"
+            "All good!"
+        )
+        result = sanitize_telegram(text)
+        assert "**Status**" in result
+        assert "• Brain — Yes" in result
+        assert "SELECT * FROM brain.decisions" in result
+        assert "```sql" in result
 
     def test_mixed_content(self):
         """Real-world message with tables + headers + normal text."""
