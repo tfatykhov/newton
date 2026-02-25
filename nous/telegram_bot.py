@@ -402,12 +402,17 @@ class NousTelegramBot:
                     await self._send(chat_id, f"\u274c Error: {error_body.decode()[:200]}")
                     return
 
+                # Track last text time for typing indicator refresh during
+                # extended thinking (thinking may take 10-30s with no text)
+                last_text_time = time.time()
+
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
                     event = json.loads(line[6:])
 
                     if event.get("type") == "text_delta":
+                        last_text_time = time.time()
                         await streamer.append_text(event.get("text", ""))
                     elif event.get("type") == "tool_start":
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
@@ -418,6 +423,11 @@ class NousTelegramBot:
                         if event.get("usage"):
                             streamer.set_usage(event["usage"])
                         break
+
+                    # Re-send typing indicator if no text for >4s (extended thinking)
+                    if time.time() - last_text_time > 4.0:
+                        await self._tg("sendChatAction", params={"chat_id": chat_id, "action": "typing"})
+                        last_text_time = time.time()
 
         except httpx.TimeoutException:
             await self._send(chat_id, "\u23f1 Request timed out.")
