@@ -48,8 +48,13 @@ class CalibrationEngine:
         )
 
         # Base filter: reviewed decisions for this agent
+        # Exclude abandoned decisions (outcome='failure', confidence=0.0) which
+        # contribute (0.0 - 0.0)^2 = 0.0 to Brier score, artificially improving it
         reviewed_filter = (
-            (Decision.agent_id == agent_id) & (Decision.outcome != "pending") & (Decision.outcome.is_not(None))
+            (Decision.agent_id == agent_id)
+            & (Decision.outcome != "pending")
+            & (Decision.outcome.is_not(None))
+            & ~((Decision.outcome == "failure") & (Decision.confidence == 0.0))
         )
 
         # --- Total and reviewed counts ---
