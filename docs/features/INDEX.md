@@ -48,12 +48,13 @@ All shipped implementation specs with PR references:
 ### v0.2.0 Preview (Future)
 | Feature | Name | Description |
 |---------|------|-------------|
-| F011 | K-Line Learning | Auto-create/refine procedures from repeated patterns |
-| F012 | Frame Splitting | Parallel cognitive frames via sub-agents |
-| F013 | Model Router | LLM portability via proxy layer |
-| F014 | Growth Engine | Administrative self-improvement (Papert's Principle) |
-| F015 | Multi-Agent | Nous agents sharing knowledge |
-| F016 | Dashboard | Visual growth tracking and cognitive state |
+| F011 | [Skill Discovery](F011-skill-discovery.md) | Index workspace skills as procedures, auto-surface in RECALL stage based on task/frame |
+| F012 | K-Line Learning | Auto-create/refine procedures from repeated patterns |
+| F013 | Frame Splitting | Parallel cognitive frames via sub-agents |
+| F014 | Model Router | LLM portability via proxy layer |
+| F015 | Growth Engine | Administrative self-improvement (Papert's Principle) |
+| F016 | Multi-Agent | Nous agents sharing knowledge |
+| F017 | Dashboard | Visual growth tracking and cognitive state |
 
 ## Stats
 
