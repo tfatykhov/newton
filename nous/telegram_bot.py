@@ -448,7 +448,7 @@ class NousTelegramBot:
             # Add debug info if requested
             if debug and "debug" in data:
                 d = data["debug"]
-                prompt = html_module.escape(d.get("system_prompt", "(empty)"))
+                prompt = html_module.escape(d.get("system_prompt", "(empty)"), quote=False)
                 debug_text = (
                     f"\n\n---\n🔍 Debug Info:\n"
                     f"Frame: {frame} (confidence: {d.get('frame_confidence', '?')})\n"

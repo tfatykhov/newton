@@ -315,6 +315,8 @@ class EpisodeManager:
         )
         if outcome is not None:
             stmt = stmt.where(Episode.outcome == outcome)
+        else:
+            stmt = stmt.where(Episode.outcome != 'abandoned')
 
         result = await session.execute(stmt)
         episodes = result.scalars().all()
@@ -358,6 +360,7 @@ class EpisodeManager:
             query_text=query,
             agent_id=self.agent_id,
             limit=limit,
+            extra_where="AND t.outcome != 'abandoned'",
         )
 
         if not results:
@@ -443,6 +446,7 @@ class EpisodeManager:
             FROM heart.episodes
             WHERE agent_id = :agent_id
               AND active = true
+              AND outcome != 'abandoned'
               AND embedding IS NOT NULL
               AND started_at > NOW() - make_interval(hours => :hours)
             ORDER BY embedding <=> :embedding::vector

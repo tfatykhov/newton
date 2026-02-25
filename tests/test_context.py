@@ -335,3 +335,92 @@ async def test_estimate_tokens(context_engine):
     assert context_engine._estimate_tokens("abcd") == 1
     assert context_engine._estimate_tokens("a" * 400) == 100
     assert context_engine._estimate_tokens("") == 1  # min 1
+
+
+# ---------------------------------------------------------------------------
+# 14-18. test_format_facts — truncation, subjects, no active/inactive (#45)
+# ---------------------------------------------------------------------------
+
+
+def _mock_fact(**kwargs):
+    """Build a mock fact object with given attributes."""
+    from unittest.mock import MagicMock
+
+    fact = MagicMock()
+    fact.content = kwargs.get("content", "A test fact")
+    fact.confidence = kwargs.get("confidence", 0.90)
+    fact.subject = kwargs.get("subject", None)
+    fact.active = kwargs.get("active", True)
+    return fact
+
+
+def _make_context_engine_light():
+    """Build a ContextEngine with mocks — no database needed."""
+    from unittest.mock import MagicMock
+
+    brain = MagicMock()
+    heart = MagicMock()
+    settings = MagicMock()
+    return ContextEngine(brain, heart, settings, identity_prompt="test")
+
+
+async def test_format_facts_short_content():
+    """14. Short facts (under 200 chars) are displayed in full."""
+    engine = _make_context_engine_light()
+    facts = [_mock_fact(content="User prefers dark mode", confidence=0.85)]
+    result = engine._format_facts(facts)
+    assert "User prefers dark mode" in result
+    assert "..." not in result
+    assert "[confidence: 0.85]" in result
+
+
+async def test_format_facts_long_content_truncated():
+    """15. Long facts (over 200 chars) are truncated at word boundary with ellipsis."""
+    engine = _make_context_engine_light()
+    long_content = "word " * 60  # 300 chars (60 * 5)
+    facts = [_mock_fact(content=long_content.strip(), confidence=0.90)]
+    result = engine._format_facts(facts)
+    assert result.count("...") == 1
+    # Content portion should be truncated — total line will be longer due to prefix
+    # but the content itself should be cut at a word boundary before 200 chars
+    content_part = result.split("[confidence:")[0]
+    # The truncated content (before "...") should not exceed 200 chars + "..."
+    assert "..." in content_part
+
+
+async def test_format_facts_with_subject():
+    """16. Facts with subjects get the [subject] prefix."""
+    engine = _make_context_engine_light()
+    facts = [_mock_fact(content="Uses PostgreSQL", subject="project", confidence=0.95)]
+    result = engine._format_facts(facts)
+    assert "[project]" in result
+    assert "Uses PostgreSQL" in result
+    assert "[confidence: 0.95]" in result
+
+
+async def test_format_facts_without_subject():
+    """17. Facts without subjects get no prefix bracket."""
+    engine = _make_context_engine_light()
+    facts = [_mock_fact(content="General knowledge fact", subject=None, confidence=0.80)]
+    result = engine._format_facts(facts)
+    assert result.startswith("- General knowledge fact")
+    assert "[confidence: 0.80]" in result
+    # Should not have any subject bracket
+    assert "[]" not in result
+    assert "[None]" not in result
+
+
+async def test_format_facts_no_active_inactive_status():
+    """18. Active/inactive status is no longer displayed (#45)."""
+    engine = _make_context_engine_light()
+    facts = [
+        _mock_fact(content="User prefers dark mode", active=True, confidence=0.90),
+        _mock_fact(content="Old preference superseded", active=False, confidence=0.70),
+    ]
+    result = engine._format_facts(facts)
+    # The old format appended ", active" or ", inactive" — verify that's gone
+    assert ", active]" not in result
+    assert ", inactive]" not in result
+    # Should not contain the word "active" or "inactive" as status labels
+    assert "active" not in result
+    assert "inactive" not in result

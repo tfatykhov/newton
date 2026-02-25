@@ -397,16 +397,25 @@ class ContextEngine:
     def _format_facts(self, facts: list) -> str:
         """Format facts for context.
 
-        P2-8: Use confidence + active (not confirmation_count + status).
-        Format: - {content} [confidence: {confidence}, {active/inactive}]
+        Format: - [subject]: content_truncated [confidence: N.NN]
+        Truncates content to 200 chars at word boundary.
         """
         lines = []
         for f in facts:
             content = getattr(f, "content", "")
             conf = getattr(f, "confidence", 1.0)
-            active = getattr(f, "active", True)
-            status = "active" if active else "inactive"
-            lines.append(f"- {content} [confidence: {conf:.2f}, {status}]")
+            subject = getattr(f, "subject", None)
+
+            # Truncate at word boundary
+            max_len = 200
+            if len(content) > max_len:
+                truncated = content[:max_len].rsplit(" ", 1)[0]
+                content = truncated + "..."
+
+            if subject:
+                lines.append(f"- [{subject}] {content} [confidence: {conf:.2f}]")
+            else:
+                lines.append(f"- {content} [confidence: {conf:.2f}]")
         return "\n".join(lines)
 
     def _format_procedures(self, procedures: list) -> str:
@@ -434,6 +443,8 @@ class ContextEngine:
         lines = []
         for e in episodes:
             outcome = getattr(e, "outcome", None) or "ongoing"
+            if outcome == "abandoned":
+                continue
             summary = getattr(e, "summary", "")
             started = getattr(e, "started_at", None)
             date_str = started.strftime("%Y-%m-%d") if started else "unknown"

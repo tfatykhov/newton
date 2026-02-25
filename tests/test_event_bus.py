@@ -1,9 +1,9 @@
 """Tests for 006 Event Bus — EventBus core, handlers, transcript, user tagging.
 
-45 test cases across 8 test classes:
+47 test cases across 8 test classes:
 - TestEventBus (8): Core bus mechanics
 - TestEpisodeSummarizer (6): Episode summary handler
-- TestFactExtractor (6): Fact extraction handler
+- TestFactExtractor (8): Fact extraction handler (#45: +2 for threshold change)
 - TestTranscriptCapture (3): Transcript accumulation in SessionMetadata
 - TestUserTagging (3): F010.5 user-tagged episodes
 - TestSessionTimeoutMonitor (7): Session timeout detection
@@ -476,16 +476,16 @@ class TestFactExtractor:
         assert fact_input.content == "User prefers dark mode"
 
     @pytest.mark.asyncio
-    async def test_deduplicates_with_score_above_065(self):
-        """16. Deduplicates against existing facts using .score > 0.65 (NOT .similarity, NOT 0.85)."""
+    async def test_deduplicates_with_score_above_085(self):
+        """16. Deduplicates against existing facts using .score > 0.85 (#45: raised from 0.65)."""
         facts_json = [
             {"subject": "user", "content": "User likes Python", "category": "preference", "confidence": 0.9},
         ]
         extractor, heart, bus, http_client = self._make_extractor()
 
-        # Return existing fact with .score above 0.65 threshold
+        # Return existing fact with .score above 0.85 threshold -> should be deduped
         existing_fact = MagicMock(spec=FactSummary)
-        existing_fact.score = 0.70  # Above 0.65 threshold -> should be deduped
+        existing_fact.score = 0.90  # Above 0.85 threshold -> deduped
         heart.search_facts = AsyncMock(return_value=[existing_fact])
         heart.learn = AsyncMock()
         http_client.post = AsyncMock(
@@ -502,6 +502,62 @@ class TestFactExtractor:
         await extractor.handle(event)
 
         heart.learn.assert_not_called()  # Deduped — not stored
+
+    @pytest.mark.asyncio
+    async def test_allows_facts_with_score_between_065_and_085(self):
+        """16b. Facts with score 0.65-0.85 pass through for supersession (#45)."""
+        facts_json = [
+            {"subject": "user", "content": "User likes Python 3.12", "category": "preference", "confidence": 0.9},
+        ]
+        extractor, heart, bus, http_client = self._make_extractor()
+
+        # Return existing fact with .score in the 0.65-0.85 range -> should NOT be deduped
+        existing_fact = MagicMock(spec=FactSummary)
+        existing_fact.score = 0.70  # Between 0.65 and 0.85 -> allowed through
+        heart.search_facts = AsyncMock(return_value=[existing_fact])
+        heart.learn = AsyncMock()
+        http_client.post = AsyncMock(
+            return_value=_mock_httpx_response(200, _llm_response(json.dumps(facts_json)))
+        )
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {"summary": "User likes Python 3.12.", "key_points": ["python"]},
+            },
+        )
+        await extractor.handle(event)
+
+        heart.learn.assert_called_once()  # Allowed through for supersession
+
+    @pytest.mark.asyncio
+    async def test_stores_fact_with_no_existing_match(self):
+        """16c. Facts with no existing match are stored normally."""
+        facts_json = [
+            {"subject": "project", "content": "Project uses PostgreSQL", "category": "technical", "confidence": 0.85},
+        ]
+        extractor, heart, bus, http_client = self._make_extractor()
+
+        heart.search_facts = AsyncMock(return_value=[])  # No existing match
+        heart.learn = AsyncMock()
+        http_client.post = AsyncMock(
+            return_value=_mock_httpx_response(200, _llm_response(json.dumps(facts_json)))
+        )
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {"summary": "Discussed project architecture.", "key_points": ["postgresql"]},
+            },
+        )
+        await extractor.handle(event)
+
+        heart.learn.assert_called_once()
+        fact_input = heart.learn.call_args[0][0]
+        assert isinstance(fact_input, FactInput)
+        assert fact_input.content == "Project uses PostgreSQL"
 
     @pytest.mark.asyncio
     async def test_skips_low_confidence_facts(self):

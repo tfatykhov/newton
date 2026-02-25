@@ -323,3 +323,54 @@ class TestStripHtmlTags:
     def test_plain_text_unchanged(self):
         text = "Hello, world!"
         assert _strip_html_tags(text) == "Hello, world!"
+
+
+class TestDebugSystemPromptEncoding:
+    """Tests for debug output HTML encoding of system prompts (#45).
+
+    The debug path in _chat() uses html.escape(prompt, quote=False) inside
+    <pre> tags. Quotes must NOT be escaped (they render as literal &quot;
+    and &#x27; inside <pre>), but <, >, & must still be escaped for valid HTML.
+    """
+
+    def _encode_debug_prompt(self, prompt: str) -> str:
+        """Replicate the debug encoding path: html.escape(prompt, quote=False)."""
+        import html as html_module
+        return f"<pre>{html_module.escape(prompt, quote=False)}</pre>"
+
+    def test_single_quotes_not_escaped(self):
+        """Single quotes must NOT be escaped to &#x27; in debug output."""
+        result = self._encode_debug_prompt("You are an agent named 'Nous'")
+        assert "&#x27;" not in result
+        assert "'" in result
+
+    def test_double_quotes_not_escaped(self):
+        """Double quotes must NOT be escaped to &quot; in debug output."""
+        result = self._encode_debug_prompt('Use the "recall_deep" tool')
+        assert "&quot;" not in result
+        assert '"' in result
+
+    def test_angle_brackets_still_escaped(self):
+        """< and > must still be escaped for valid HTML inside <pre>."""
+        result = self._encode_debug_prompt("if a < b and c > d")
+        assert "&lt;" in result
+        assert "&gt;" in result
+        assert "a < b" not in result  # raw < would break HTML
+
+    def test_ampersand_still_escaped(self):
+        """& must still be escaped for valid HTML inside <pre>."""
+        result = self._encode_debug_prompt("foo & bar")
+        assert "&amp;" in result
+        assert "foo & bar" not in result  # raw & would break HTML entities
+
+    def test_mixed_quotes_and_html_chars(self):
+        """Prompt with both quotes and HTML-special chars encodes correctly."""
+        prompt = """You are "Nous" — an agent that uses 'recall_deep' when x < 10 & y > 5."""
+        result = self._encode_debug_prompt(prompt)
+        # Quotes preserved literally
+        assert '"Nous"' in result
+        assert "'recall_deep'" in result
+        # HTML-special chars escaped
+        assert "&lt;" in result
+        assert "&gt;" in result
+        assert "&amp;" in result

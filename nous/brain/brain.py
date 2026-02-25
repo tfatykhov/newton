@@ -487,6 +487,10 @@ class Brain:
             filter_clauses += " AND d.stakes = :stakes"
         if outcome:
             filter_clauses += " AND d.outcome = :outcome"
+        else:
+            # Exclude abandoned decisions (outcome='failure', confidence=0.0)
+            # unless caller explicitly requests a specific outcome
+            filter_clauses += " AND NOT (d.outcome = 'failure' AND d.confidence = 0.0)"
 
         # Bridge-side filter (P2-10: ILIKE on bridge columns)
         bridge_join = ""
