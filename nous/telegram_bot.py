@@ -33,6 +33,7 @@ TG_API = "https://api.telegram.org/bot{token}/{method}"
 TG_MAX_LEN = 4096
 
 # Regex patterns for markdown sanitization
+import html as html_module
 import re
 
 _FENCED_BLOCK_RE = re.compile(r"```[\s\S]*?```", re.MULTILINE)
@@ -40,6 +41,12 @@ _TABLE_SEP_RE = re.compile(r"^\|[-:| ]+\|$", re.MULTILINE)  # |---|---|
 _TABLE_ROW_RE = re.compile(r"^\|(.+)\|$", re.MULTILINE)  # | col | col |
 _HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)  # ## Header
 _HR_RE = re.compile(r"^-{3,}$", re.MULTILINE)  # ---
+
+# Additional patterns for HTML conversion
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")  # **bold**
+_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")  # `inline code`
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")  # [text](url)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def sanitize_telegram(text: str) -> str:
@@ -64,15 +71,6 @@ def sanitize_telegram(text: str) -> str:
     text = _TABLE_SEP_RE.sub("", text)
 
     # Convert table rows to bullet points
-    def _table_row_to_bullet(match: re.Match) -> str:
-        cells = [c.strip() for c in match.group(1).split("|") if c.strip()]
-        if len(cells) == 1:
-            return f"• {cells[0]}"
-        elif len(cells) == 2:
-            return f"• {cells[0]} — {cells[1]}"
-        else:
-            return "• " + " — ".join(cells)
-
     text = _TABLE_ROW_RE.sub(_table_row_to_bullet, text)
 
     # Convert headers to bold
@@ -89,6 +87,106 @@ def sanitize_telegram(text: str) -> str:
         text = text.replace(f"\x00CODEBLOCK{i}\x00", block)
 
     return text.strip()
+
+
+def _table_row_to_bullet(match: re.Match) -> str:
+    """Convert a markdown table row to a bullet point."""
+    cells = [c.strip() for c in match.group(1).split("|") if c.strip()]
+    if len(cells) == 1:
+        return f"• {cells[0]}"
+    elif len(cells) == 2:
+        return f"• {cells[0]} — {cells[1]}"
+    else:
+        return "• " + " — ".join(cells)
+
+
+def format_telegram_html(text: str) -> str:
+    """Convert markdown to Telegram-compatible HTML for parse_mode='HTML'.
+
+    Full conversion for final message sends. Handles:
+    - Fenced code blocks → <pre><code>
+    - Inline code → <code>
+    - **bold** → <b>
+    - ## Headers → <b>
+    - [text](url) → <a href>
+    - Tables → bullet lists (plain text)
+    - --- horizontal rules → removed
+    - HTML entity escaping for safe rendering
+    """
+    # 1. Stash fenced code blocks (protect from all processing)
+    code_stash: list[str] = []
+
+    def _stash_code(match: re.Match) -> str:
+        code_stash.append(match.group(0))
+        return f"\x00CODEBLOCK{len(code_stash) - 1}\x00"
+
+    text = _FENCED_BLOCK_RE.sub(_stash_code, text)
+
+    # 2. Stash inline code (protect from HTML escaping)
+    inline_stash: list[str] = []
+
+    def _stash_inline(match: re.Match) -> str:
+        inline_stash.append(match.group(1))
+        return f"\x00INLINE{len(inline_stash) - 1}\x00"
+
+    text = _INLINE_CODE_RE.sub(_stash_inline, text)
+
+    # 3. Escape HTML entities in remaining text
+    text = text.replace("&", "&amp;")
+    text = text.replace("<", "&lt;")
+    text = text.replace(">", "&gt;")
+
+    # 4. Convert tables to bullet points (plain text)
+    text = _TABLE_SEP_RE.sub("", text)
+    text = _TABLE_ROW_RE.sub(_table_row_to_bullet, text)
+
+    # 5. Convert ## Headers → <b>Header</b>
+    text = _HEADER_RE.sub(r"<b>\1</b>", text)
+
+    # 6. Convert **bold** → <b>bold</b>
+    text = _BOLD_RE.sub(r"<b>\1</b>", text)
+
+    # 7. Convert [text](url) → <a href="url">text</a>
+    text = _LINK_RE.sub(r'<a href="\2">\1</a>', text)
+
+    # 8. Remove horizontal rules
+    text = _HR_RE.sub("", text)
+
+    # 9. Clean up excessive blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 10. Restore inline code as <code> (with HTML escaping)
+    for i, code in enumerate(inline_stash):
+        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        text = text.replace(f"\x00INLINE{i}\x00", f"<code>{escaped}</code>")
+
+    # 11. Restore code blocks as <pre> (with HTML escaping)
+    for i, block in enumerate(code_stash):
+        block_match = re.match(r"```(\w*)\n?([\s\S]*?)```", block)
+        if block_match:
+            lang = block_match.group(1)
+            code = block_match.group(2).rstrip()
+            code = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            if lang:
+                text = text.replace(
+                    f"\x00CODEBLOCK{i}\x00",
+                    f'<pre><code class="language-{lang}">{code}</code></pre>',
+                )
+            else:
+                text = text.replace(f"\x00CODEBLOCK{i}\x00", f"<pre>{code}</pre>")
+        else:
+            text = text.replace(f"\x00CODEBLOCK{i}\x00", block)
+
+    return text.strip()
+
+
+def _strip_html_tags(text: str) -> str:
+    """Strip HTML tags and unescape entities for plain text fallback."""
+    text = _HTML_TAG_RE.sub("", text)
+    text = text.replace("&lt;", "<")
+    text = text.replace("&gt;", ">")
+    text = text.replace("&amp;", "&")
+    return text
 
 
 def format_usage_footer(usage: dict[str, int]) -> str:
@@ -170,7 +268,7 @@ class StreamingMessage:
         return "\n\n".join(parts)
 
     async def finalize(self) -> None:
-        """Send final version of message with usage footer."""
+        """Send final version of message with HTML formatting and usage footer."""
         # Clear tool indicators for final message, keep only base text + footer
         self._tool_counts.clear()
         self.text = self._build_display_text()
@@ -179,24 +277,30 @@ class StreamingMessage:
         if self._usage:
             self.text += f"\n\n{format_usage_footer(self._usage)}"
 
-        await self._send_or_edit()
+        await self._send_or_edit(parse_mode="HTML")
 
-    async def _send_or_edit(self) -> None:
+    async def _send_or_edit(self, parse_mode: str | None = None) -> None:
         if not self.text.strip():
             return
 
-        display_text = sanitize_telegram(self.text)
+        if parse_mode == "HTML":
+            display_text = format_telegram_html(self.text)
+        else:
+            display_text = sanitize_telegram(self.text)
 
         # N7: Handle 4096 char overflow
         if len(display_text) > 4000 and self.message_id is not None:
             overflow = display_text[4000:]
             truncated = display_text[:4000] + "\n\n(continued...)"
-            await self._bot._tg("editMessageText", params={
+            edit_params: dict[str, Any] = {
                 "chat_id": self.chat_id,
                 "message_id": self.message_id,
                 "text": truncated,
-            })
-            result = await self._bot._send(self.chat_id, overflow)
+            }
+            if parse_mode:
+                edit_params["parse_mode"] = parse_mode
+            await self._bot._tg("editMessageText", params=edit_params)
+            result = await self._bot._send(self.chat_id, overflow, parse_mode=parse_mode)
             if isinstance(result, dict) and "message_id" in result:
                 self.message_id = result["message_id"]
             self.text = overflow
@@ -205,16 +309,20 @@ class StreamingMessage:
             return
 
         if self.message_id is None:
-            result = await self._bot._send(self.chat_id, display_text)
+            result = await self._bot._send(
+                self.chat_id, display_text, parse_mode=parse_mode
+            )
             if isinstance(result, dict) and "message_id" in result:
                 self.message_id = result["message_id"]
         else:
-            # No parse_mode during streaming (review B3: partial markdown breaks)
-            await self._bot._tg("editMessageText", params={
+            edit_params = {
                 "chat_id": self.chat_id,
                 "message_id": self.message_id,
                 "text": display_text,
-            })
+            }
+            if parse_mode:
+                edit_params["parse_mode"] = parse_mode
+            await self._bot._tg("editMessageText", params=edit_params)
         self._last_edit = time.time()
         self._pending = False
 
@@ -322,8 +430,8 @@ class NousTelegramBot:
             if "session_id" in data:
                 self._sessions[chat_id] = data["session_id"]
 
-            # Build response text (sanitize LLM output for Telegram)
-            reply = sanitize_telegram(data.get("response", "No response"))
+            # Build response text (convert LLM markdown to Telegram HTML)
+            reply = format_telegram_html(data.get("response", "No response"))
             frame = data.get("frame", "unknown")
 
             # Add frame indicator
@@ -340,7 +448,7 @@ class NousTelegramBot:
             # Add debug info if requested
             if debug and "debug" in data:
                 d = data["debug"]
-                prompt = d.get("system_prompt", "(empty)")
+                prompt = html_module.escape(d.get("system_prompt", "(empty)"))
                 debug_text = (
                     f"\n\n---\n🔍 Debug Info:\n"
                     f"Frame: {frame} (confidence: {d.get('frame_confidence', '?')})\n"
@@ -349,7 +457,7 @@ class NousTelegramBot:
                     f"Facts: {d.get('related_facts', 0)}\n"
                     f"Episodes: {d.get('related_episodes', 0)}\n"
                     f"Context tokens: {d.get('context_tokens', 0)}\n"
-                    f"\n📋 SYSTEM PROMPT:\n{prompt}"
+                    f"\n📋 SYSTEM PROMPT:\n<pre>{prompt}</pre>"
                 )
                 reply += debug_text
 
@@ -360,7 +468,7 @@ class NousTelegramBot:
 
             # Split long messages
             full_reply = f"{frame_tag}\n\n{reply}"
-            await self._send_long(chat_id, full_reply)
+            await self._send_long(chat_id, full_reply, parse_mode="HTML")
 
             # If decision was recorded, add a subtle indicator
             if data.get("decision_id"):
@@ -444,10 +552,12 @@ class NousTelegramBot:
             params["parse_mode"] = parse_mode
         return await self._tg("sendMessage", params=params)
 
-    async def _send_long(self, chat_id: int, text: str) -> None:
+    async def _send_long(
+        self, chat_id: int, text: str, parse_mode: str | None = None
+    ) -> None:
         """Send a long message, splitting if needed."""
         if len(text) <= TG_MAX_LEN:
-            await self._send(chat_id, text)
+            await self._send(chat_id, text, parse_mode=parse_mode)
             return
 
         # Split on newlines, respecting max length
@@ -464,7 +574,7 @@ class NousTelegramBot:
             chunks.append(current)
 
         for chunk in chunks:
-            await self._send(chat_id, chunk)
+            await self._send(chat_id, chunk, parse_mode=parse_mode)
             await asyncio.sleep(0.3)  # Rate limit
 
     async def _get_last_bot_message_id(self, chat_id: int) -> int | None:
@@ -472,11 +582,29 @@ class NousTelegramBot:
         return None  # TODO: track sent message IDs
 
     async def _tg(self, method: str, params: dict[str, Any] | None = None) -> Any:
-        """Call Telegram Bot API."""
+        """Call Telegram Bot API with parse_mode fallback.
+
+        If a request with parse_mode fails (e.g. malformed HTML from LLM output),
+        retries without parse_mode using plain text as a fallback.
+        """
         url = TG_API.format(token=self.bot_token, method=method)
         response = await self._http.get(url, params=params)
         data = response.json()
         if not data.get("ok"):
+            # Retry without parse_mode if formatting caused the error
+            if params and "parse_mode" in params:
+                logger.warning(
+                    "Telegram API error with parse_mode=%s, retrying plain: %s",
+                    params["parse_mode"],
+                    data.get("description", ""),
+                )
+                fallback_params = {k: v for k, v in params.items() if k != "parse_mode"}
+                if "text" in fallback_params:
+                    fallback_params["text"] = _strip_html_tags(fallback_params["text"])
+                response = await self._http.get(url, params=fallback_params)
+                data = response.json()
+                if data.get("ok"):
+                    return data.get("result", {})
             logger.warning("Telegram API error: %s", data)
             return data.get("result", [])
         return data.get("result", {})
