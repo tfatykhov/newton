@@ -257,6 +257,7 @@ class AgentRunner:
         agent_id: str | None = None,
         user_id: str | None = None,
         user_display_name: str | None = None,
+        platform: str | None = None,
     ) -> tuple[str, TurnContext, dict[str, int]]:
         """Execute a single conversational turn.
 
@@ -298,7 +299,7 @@ class AgentRunner:
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         error = None
         try:
-            system_prompt = self._build_system_prompt(turn_context)
+            system_prompt = self._build_system_prompt(turn_context, platform=platform)
             response_text, tool_results, usage = await self._tool_loop(
                 system_prompt=system_prompt,
                 conversation=conversation,
@@ -512,6 +513,7 @@ class AgentRunner:
         agent_id: str | None = None,
         user_id: str | None = None,
         user_display_name: str | None = None,
+        platform: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Full chat turn with streaming, including tool loops.
 
@@ -539,7 +541,7 @@ class AgentRunner:
 
         conversation.messages.append(Message(role="user", content=user_message))
 
-        system_prompt = self._build_system_prompt(turn_context)
+        system_prompt = self._build_system_prompt(turn_context, platform=platform)
         tools = self._dispatcher.available_tools(turn_context.frame.frame_id)
         messages = self._format_messages(conversation)
 
@@ -803,9 +805,33 @@ class AgentRunner:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    # Platform-specific formatting instructions
+    _TELEGRAM_FORMAT_INSTRUCTIONS = """## Output Formatting (Telegram)
+You are responding in Telegram. Format accordingly:
+
+For structured information, use this style:
+
+🧠 Section Name
+• Item one — description
+• Item two — description
+
+📊 Another Section
+• Key: value
+• Key: value
+
+Rules:
+- NEVER use markdown tables (| col | col |). Use bullet lists instead.
+- NEVER use ## headers in your response. Use emoji + **bold** for section headers.
+- Use bullet points (• or -) for all lists.
+- Use em dashes (—) to separate item from description.
+- Keep formatting simple: **bold**, _italic_, `code`, code blocks only.
+- No horizontal rules (---).
+"""
+
     def _build_system_prompt(
         self,
         turn_context: TurnContext,
+        platform: str | None = None,
     ) -> str:
         """Build the system prompt: cognitive context + frame instructions.
 
@@ -818,6 +844,10 @@ class AgentRunner:
         frame_instructions = self._get_frame_instructions(turn_context)
         if frame_instructions:
             parts.append(frame_instructions)
+
+        # Platform-specific formatting
+        if platform == "telegram":
+            parts.append(self._TELEGRAM_FORMAT_INSTRUCTIONS)
 
         return "\n\n".join(parts)
 

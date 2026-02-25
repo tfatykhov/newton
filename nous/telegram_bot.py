@@ -32,6 +32,64 @@ TG_API = "https://api.telegram.org/bot{token}/{method}"
 # Max Telegram message length
 TG_MAX_LEN = 4096
 
+# Regex patterns for markdown sanitization
+import re
+
+_FENCED_BLOCK_RE = re.compile(r"```[\s\S]*?```", re.MULTILINE)
+_TABLE_SEP_RE = re.compile(r"^\|[-:| ]+\|$", re.MULTILINE)  # |---|---|
+_TABLE_ROW_RE = re.compile(r"^\|(.+)\|$", re.MULTILINE)  # | col | col |
+_HEADER_RE = re.compile(r"^#{1,6}\s+(.+)$", re.MULTILINE)  # ## Header
+_HR_RE = re.compile(r"^-{3,}$", re.MULTILINE)  # ---
+
+
+def sanitize_telegram(text: str) -> str:
+    """Convert markdown patterns that don't render in Telegram.
+
+    Fallback sanitizer for when the LLM ignores formatting instructions.
+    - Markdown tables → bullet lists
+    - ## Headers → **bold**
+    - --- horizontal rules → removed
+    - Fenced code blocks are preserved (not sanitized).
+    """
+    # Stash fenced code blocks to protect them from sanitization
+    stash: list[str] = []
+
+    def _stash_block(match: re.Match) -> str:
+        stash.append(match.group(0))
+        return f"\x00CODEBLOCK{len(stash) - 1}\x00"
+
+    text = _FENCED_BLOCK_RE.sub(_stash_block, text)
+
+    # Remove table separator rows first
+    text = _TABLE_SEP_RE.sub("", text)
+
+    # Convert table rows to bullet points
+    def _table_row_to_bullet(match: re.Match) -> str:
+        cells = [c.strip() for c in match.group(1).split("|") if c.strip()]
+        if len(cells) == 1:
+            return f"• {cells[0]}"
+        elif len(cells) == 2:
+            return f"• {cells[0]} — {cells[1]}"
+        else:
+            return "• " + " — ".join(cells)
+
+    text = _TABLE_ROW_RE.sub(_table_row_to_bullet, text)
+
+    # Convert headers to bold
+    text = _HEADER_RE.sub(r"**\1**", text)
+
+    # Remove horizontal rules
+    text = _HR_RE.sub("", text)
+
+    # Clean up excessive blank lines left by removals
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Restore fenced code blocks
+    for i, block in enumerate(stash):
+        text = text.replace(f"\x00CODEBLOCK{i}\x00", block)
+
+    return text.strip()
+
 
 def format_usage_footer(usage: dict[str, int]) -> str:
     """Format token usage as a compact footer string."""
@@ -127,7 +185,7 @@ class StreamingMessage:
         if not self.text.strip():
             return
 
-        display_text = self.text
+        display_text = sanitize_telegram(self.text)
 
         # N7: Handle 4096 char overflow
         if len(display_text) > 4000 and self.message_id is not None:
@@ -242,7 +300,7 @@ class NousTelegramBot:
         await self._tg("sendChatAction", params={"chat_id": chat_id, "action": "typing"})
 
         session_id = self._sessions.get(chat_id)
-        payload: dict[str, Any] = {"message": text}
+        payload: dict[str, Any] = {"message": text, "platform": "telegram"}
         if session_id:
             payload["session_id"] = session_id
         if debug:
@@ -264,8 +322,8 @@ class NousTelegramBot:
             if "session_id" in data:
                 self._sessions[chat_id] = data["session_id"]
 
-            # Build response text
-            reply = data.get("response", "No response")
+            # Build response text (sanitize LLM output for Telegram)
+            reply = sanitize_telegram(data.get("response", "No response"))
             frame = data.get("frame", "unknown")
 
             # Add frame indicator
@@ -329,7 +387,7 @@ class NousTelegramBot:
 
         # P1 fix: generate session_id upfront so client and server use same ID
         session_id = self._sessions.setdefault(chat_id, str(uuid4()))
-        payload: dict[str, Any] = {"message": text, "session_id": session_id}
+        payload: dict[str, Any] = {"message": text, "session_id": session_id, "platform": "telegram"}
 
         streamer = StreamingMessage(self, chat_id)
 
