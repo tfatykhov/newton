@@ -423,7 +423,7 @@ class TestEpisodeDedup:
         inp = EpisodeInput(summary="Show me your current status and tools")
         await manager._start(inp, mock_session)
 
-        # No dedup -> new episode added
+        # No dedup — new episode added
         mock_session.add.assert_called_once()
 
     # Test 12: Episode start no dedup after 30 min
