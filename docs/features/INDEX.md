@@ -55,6 +55,7 @@ All shipped implementation specs with PR references:
 | F015 | Growth Engine | Administrative self-improvement (Papert's Principle) |
 | F016 | Multi-Agent | Nous agents sharing knowledge |
 | F017 | Dashboard | Visual growth tracking and cognitive state |
+| F018 | [Agent Identity](F018-agent-identity.md) | DB-backed identity layer — character, values, protocols that evolve over time |
 
 ## Stats
 

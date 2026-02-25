@@ -138,33 +138,32 @@ Update memory at all levels:
 ```mermaid
 graph TB
     subgraph "Slow (Identity)"
-        SOUL[SOUL.md<br/>Character & Values]
-        AGENTS[AGENTS.md<br/>Protocols & Process]
+        ID["Agent Identity (DB)<br/>Character · Values · Protocols<br/><i>F018 — planned</i>"]
     end
 
     subgraph "Medium (Knowledge)"
-        MEM[MEMORY.md<br/>Curated Long-Term]
-        KL[K-Lines<br/>Context Bundles]
-        EP[Episodes<br/>Multi-Day Projects]
+        FACTS[Facts<br/>Learned Knowledge]
+        KL["Procedures / K-Lines<br/>Context Bundles<br/><i>F011 — planned</i>"]
+        EP[Episodes<br/>Multi-Session Projects]
     end
 
     subgraph "Fast (Working)"
-        NOW[NOW.md<br/>Current Focus]
-        DAILY[Daily Logs<br/>Raw Session Notes]
+        WM[Working Memory<br/>Current Turn Context]
+        EV[Events<br/>Raw Activity Log]
     end
 
-    subgraph "Persistent (External)"
-        CE[Cognition Engines<br/>Decision Memory]
-        CHROMA[ChromaDB<br/>Semantic Index]
+    subgraph "Persistent (Intelligence)"
+        DEC[Decisions<br/>Brain Memory]
+        CAL[Calibration<br/>Confidence Learning]
     end
 
-    SOUL --> MEM
-    MEM --> KL
-    KL --> NOW
-    DAILY -->|weekly synthesis| MEM
-    MEM -->|indexes into| CHROMA
-    CE -->|calibrates| MEM
-    KL -->|activates for| CE
+    ID -->|shapes| FACTS
+    FACTS --> KL
+    KL --> WM
+    EV -->|distills into| FACTS
+    DEC -->|calibrates| CAL
+    KL -->|activates for| DEC
+    CAL -->|improves| ID
 ```
 
 **Key principle:** Each layer learns to exploit the last, then stabilizes and becomes a foundation. Layers become substrates. The slowest-changing layers provide the most continuity.
