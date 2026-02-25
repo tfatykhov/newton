@@ -7,12 +7,14 @@ All methods follow Brain's session injection pattern (P1-1).
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from nous.utils import text_overlap
 
 from nous.brain.embeddings import EmbeddingProvider
 from nous.heart.schemas import EpisodeDetail, EpisodeInput, EpisodeSummary
@@ -25,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 class EpisodeManager:
     """Manages episodic memory — what happened."""
+
+    # 006.2: Dedup window and threshold
+    _DEDUP_WINDOW_MINUTES = 30
+    _DEDUP_THRESHOLD = 0.80
 
     def __init__(
         self,
@@ -63,6 +69,21 @@ class EpisodeManager:
         return await self._start(input, session)
 
     async def _start(self, input: EpisodeInput, session: AsyncSession) -> EpisodeDetail:
+        # 006.2: Dedup — check for similar ongoing episodes in recent window
+        cutoff = datetime.now(UTC) - timedelta(minutes=self._DEDUP_WINDOW_MINUTES)
+        recent_result = await session.execute(
+            select(Episode).where(
+                Episode.agent_id == self.agent_id,
+                Episode.ended_at.is_(None),  # ongoing = not ended
+                Episode.started_at >= cutoff,
+            )
+        )
+        for existing_ep in recent_result.scalars().all():
+            if text_overlap(existing_ep.summary or "", input.summary or "") > self._DEDUP_THRESHOLD:
+                logger.debug("Reusing existing episode %s (similar summary)", existing_ep.id)
+                reloaded = await self._get_episode_orm(existing_ep.id, session)
+                return self._to_detail(reloaded)
+
         # Generate embedding from title + summary
         embedding = None
         if self.embeddings:

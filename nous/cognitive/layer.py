@@ -296,23 +296,31 @@ class CognitiveLayer:
 
         # 3. DELIBERATION — finalize if decision exists
         if decision_id:
-            try:
-                has_tool_errors = any(tr.error for tr in turn_result.tool_results)
-                if turn_result.error is not None:
-                    confidence = 0.3
-                elif has_tool_errors:
-                    confidence = 0.5
-                else:
-                    confidence = 0.8
+            if self._is_informational(turn_result):
+                # 006.2: Abandon orphaned deliberation for informational responses
+                logger.debug("Abandoning deliberation %s: informational response", decision_id)
+                try:
+                    await self._deliberation.abandon(decision_id, session=session)
+                except Exception:
+                    logger.debug("Failed to abandon deliberation %s", decision_id)
+            else:
+                try:
+                    has_tool_errors = any(tr.error for tr in turn_result.tool_results)
+                    if turn_result.error is not None:
+                        confidence = 0.3
+                    elif has_tool_errors:
+                        confidence = 0.5
+                    else:
+                        confidence = 0.8
 
-                await self._deliberation.finalize(
-                    decision_id,
-                    description=turn_result.response_text[:200],
-                    confidence=confidence,
-                    session=session,
-                )
-            except Exception:
-                logger.warning("Failed to finalize deliberation for %s", decision_id)
+                    await self._deliberation.finalize(
+                        decision_id,
+                        description=turn_result.response_text[:200],
+                        confidence=confidence,
+                        session=session,
+                    )
+                except Exception:
+                    logger.warning("Failed to finalize deliberation for %s", decision_id)
 
         # 4. USAGE TRACKING — record which recalled memories were referenced (005.1)
         if self._usage_tracker and turn_context.recalled_content_map:
@@ -374,6 +382,31 @@ class CognitiveLayer:
             logger.warning("Failed to emit turn_completed event")
 
         return assessment
+
+    # ------------------------------------------------------------------
+    # Informational detection (006.2)
+    # ------------------------------------------------------------------
+
+    def _is_informational(self, turn_result: TurnResult) -> bool:
+        """Detect responses that are information, not decisions (006.2).
+
+        Returns True when the response is a status dump or memory recall
+        that should NOT be recorded as a decision. Checks:
+        1. If record_decision tool was called -> always a real decision
+        2. Conservative keyword patterns for status/memory responses
+        """
+        # If agent explicitly recorded a decision, it's real
+        tools_used = {r.tool_name for r in turn_result.tool_results}
+        if "record_decision" in tools_used:
+            return False
+
+        # Conservative: only match clear informational patterns
+        response_lower = turn_result.response_text[:500].lower()
+        info_patterns = [
+            "current status", "available tools",
+            "i remember", "my memory", "what i know",
+        ]
+        return any(p in response_lower for p in info_patterns)
 
     # ------------------------------------------------------------------
     # Episode significance & dedup (005.5)

@@ -10,7 +10,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.embeddings import EmbeddingProvider
@@ -147,6 +147,12 @@ class FactManager:
         session.add(fact)
         await session.flush()
 
+        # Subject + similarity supersession (006.2)
+        if check_contradictions and input.subject and embedding is not None:
+            await self._supersede_by_subject(
+                fact.id, input.subject, embedding, session
+            )
+
         await self._emit_event(
             session,
             "fact_learned",
@@ -273,6 +279,51 @@ class FactManager:
                     "threshold": self.DOMAIN_COMPACTION_THRESHOLD,
                 },
             )
+
+    async def _supersede_by_subject(
+        self,
+        new_fact_id: UUID,
+        subject: str,
+        embedding: list[float],
+        session: AsyncSession,
+    ) -> None:
+        """Supersede older facts with same subject AND similar content (006.2).
+
+        Only supersedes when both conditions are met:
+        1. Same subject (case-insensitive exact match)
+        2. Cosine similarity > 0.80 (content about same aspect)
+
+        This prevents "Nous version 0.2" from nuking "Nous uses PostgreSQL"
+        while correctly superseding "Nous version 0.1".
+        """
+        result = await session.execute(
+            select(Fact).where(
+                Fact.agent_id == self.agent_id,
+                Fact.active == True,  # noqa: E712
+                func.lower(Fact.subject) == subject.lower(),
+                Fact.id != new_fact_id,
+            )
+        )
+        for old in result.scalars().all():
+            if old.embedding is not None:
+                similarity = self._cosine_similarity(embedding, old.embedding)
+                if similarity > 0.80:
+                    old.active = False
+                    old.superseded_by = new_fact_id
+                    logger.info(
+                        "Superseded fact %s (subject=%s, sim=%.2f) by %s",
+                        old.id, subject, similarity, new_fact_id,
+                    )
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two embedding vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
 
     async def _find_duplicate(
         self,

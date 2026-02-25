@@ -11,6 +11,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nous.utils import text_overlap
+
 from nous.brain.brain import Brain
 from nous.cognitive.dedup import ConversationDeduplicator
 from nous.cognitive.intent import RetrievalPlan
@@ -575,3 +577,36 @@ class ContextEngine:
             )
 
         return f"Unknown memory type: {memory_type}"
+
+    def _dedup_decisions(self, decisions: list) -> list:
+        """Remove near-duplicate decisions, keeping the most recent (006.2).
+
+        Preserves decisions with different outcomes even if descriptions overlap
+        (e.g., success and failure on the same task are both valuable).
+        """
+        if len(decisions) <= 1:
+            return decisions
+
+        # Sort newest first so first-seen = most recent
+        decisions = sorted(
+            decisions,
+            key=lambda d: getattr(d, "created_at", None) or "",
+            reverse=True,
+        )
+
+        kept: list = []
+        for d in decisions:
+            desc = getattr(d, "description", "") or ""
+            outcome = getattr(d, "outcome", "pending") or "pending"
+            is_dup = False
+            for k in kept:
+                k_desc = getattr(k, "description", "") or ""
+                k_outcome = getattr(k, "outcome", "pending") or "pending"
+                # Only dedup if BOTH description similar AND same outcome
+                if (outcome == k_outcome and
+                        text_overlap(desc[:150], k_desc[:150]) > 0.80):
+                    is_dup = True
+                    break
+            if not is_dup:
+                kept.append(d)
+        return kept
