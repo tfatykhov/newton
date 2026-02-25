@@ -32,6 +32,7 @@ services:
       - NOUS_SESSION_TIMEOUT=${NOUS_SESSION_TIMEOUT:-1800}
       - NOUS_SLEEP_TIMEOUT=${NOUS_SLEEP_TIMEOUT:-7200}
       - NOUS_SLEEP_CHECK_INTERVAL=${NOUS_SLEEP_CHECK_INTERVAL:-60}
+      - NOUS_IDENTITY_PROMPT=${NOUS_IDENTITY_PROMPT:-}
     depends_on:
       postgres:
         condition: service_healthy

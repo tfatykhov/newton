@@ -256,6 +256,20 @@ Both projects evolve independently. The shared asset is the philosophy, not the 
 
 7. **How does Fredkin's Paradox interact with stakes?** Low-stakes decisions should resolve fast. High-stakes decisions need more deliberation. What's the mapping?
 
+## Configuration
+
+Key environment variables (see `.env.example` for the full list):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOUS_IDENTITY_PROMPT` | Built-in default | **Agent identity.** Injected as the first section of every system prompt. This is how Nous knows who it is and how to behave. Override to customize personality. |
+| `NOUS_MODEL` | `claude-sonnet-4-5-20250514` | LLM model for the main agent loop |
+| `NOUS_MAX_TURNS` | `10` | Max tool-use iterations per turn. Increase for complex multi-step tasks. |
+| `NOUS_THINKING_MODE` | `off` | Extended thinking: `off`, `adaptive` (recommended for 4.6), or `manual` |
+| `NOUS_EFFORT` | `high` | Thinking depth for adaptive mode: `low`, `medium`, `high`, `max` |
+| `NOUS_EVENT_BUS_ENABLED` | `true` | Enable async event handlers (episode summarizer, fact extractor) |
+| `NOUS_WORKSPACE_DIR` | `/tmp/nous-workspace` | Agent workspace directory |
+
 ## Status
 
 🚀 **v0.1.0 — shipped and deployed.**
