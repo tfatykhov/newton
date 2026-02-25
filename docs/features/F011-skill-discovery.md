@@ -242,9 +242,93 @@ All three tables are built and waiting for data.
 - **F008 Memory Lifecycle** — Skills from filesystem are "permanent" (re-indexed on startup). Learned procedures from experience follow normal lifecycle.
 - **v0.2.0 F011 K-Line Learning** — Learned procedures complement filesystem skills. Over time, Nous discovers its own "skills" from repeated patterns.
 
+## Two-Pass RECALL: Merge & Ranking
+
+Skill discovery uses a two-pass RECALL with merged scoring:
+
+### Pass 1: Semantic Search
+Query procedures by embedding similarity to user input. Returns `(skill_id, semantic_score)`.
+
+### Pass 2: Frame-Domain Filter
+Query procedures where `domain` matches current frame or `tags` contain the frame ID. Returns `(skill_id, domain_match=true)`.
+
+### Merge Strategy
+```python
+# Combine scores, deduplicate by name
+combined = {}
+for skill_id, score in semantic_results:
+    combined[skill_id] = score
+for skill_id, _ in domain_results:
+    combined[skill_id] = combined.get(skill_id, 0.0) + 0.2  # frame boost
+
+# Sort by score, take top 3
+top_skills = sorted(combined.items(), key=lambda x: -x[1])[:3]
+```
+
+- Frame-domain match adds `+0.2` score boost
+- Deduplicate by skill `name`
+- Top K=3 (fits within procedures context budget)
+
+## Working Memory Content Format
+
+When a skill loads into working memory, use a **compact format** — not full SKILL.md:
+
+```
+[Skill: serper-search]
+Domain: research
+Tools: web_search, web_fetch
+Triggers: web search, google, find online, research
+---
+{first H2 section from SKILL.md — the "when to use" prose}
+```
+
+Full SKILL.md stays on disk, fetchable via `read_file` if the agent needs implementation details. This keeps 3 simultaneous skills within ~300-400 tokens total.
+
+## Monitor Stage: Effectiveness Wiring
+
+The MONITOR stage (post-turn) evaluates skill effectiveness:
+
+```python
+# In CognitiveLayer.post_turn(), after outcome assessment
+for skill_id in turn_context.activated_skills:
+    if turn_succeeded:
+        await self._heart.record_procedure_outcome(skill_id, success=True)
+    elif turn_failed:
+        await self._heart.record_procedure_outcome(skill_id, success=False)
+```
+
+This wires into the existing `success_count` / `failure_count` columns. Skills with `failure_count / (success_count + failure_count) > 0.6` after 5+ activations get a `-0.1` score penalty in RECALL.
+
+## Re-indexing Strategy
+
+**v1: Startup-only.** SkillIndexer runs once on application start. New skills added mid-session require a restart.
+
+**Future options (not in v1):**
+- Manual trigger via `/index-skills` Telegram command
+- File watcher (fsnotify) on the skills directory
+- Event-driven: `skill_added` bus event triggers re-index
+
+This is an explicit design constraint, not an oversight.
+
+## `requires` Field Semantics
+
+The `requires` field lists **environment variables** that must be set for the skill to function:
+
+```yaml
+requires:
+  - SERPER_API_KEY
+  - BRAVE_SEARCH_API_KEY
+```
+
+At index time, SkillIndexer checks `os.environ` for each required var:
+- **All present** → procedure stored with `active=True`
+- **Any missing** → procedure stored with `active=False`, logged as warning
+- Inactive procedures are excluded from RECALL search
+
+This prevents the agent from loading a skill into working memory, attempting to use it, and failing because a required API key is missing.
+
 ## Open Questions
 
-1. Should skills be re-indexed on every startup, or only when files change (fswatch)?
-2. Should the agent be able to create new skill files from learned procedures (the reverse flow)?
-3. How to handle skill conflicts (two skills claim the same domain/triggers)?
-4. Should skill SKILL.md content be loaded into context verbatim, or summarized?
+1. Should the agent be able to create new skill files from learned procedures (the reverse flow)?
+2. How to handle skill conflicts (two skills claim the same domain/triggers)?
+3. Should effectiveness penalties decay over time (skill improved but old failures drag it down)?
