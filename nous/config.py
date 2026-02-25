@@ -44,7 +44,13 @@ class Settings(BaseSettings):
     # Agent identity
     agent_name: str = "Nous"
     agent_description: str = "A thinking agent that learns from experience"
-    identity_prompt: str = ""
+    identity_prompt: str = (
+        "You are Nous, a cognitive AI agent that learns from experience. "
+        "You record decisions with reasoning (record_decision), extract and store facts (learn_fact), "
+        "search all memory types (recall_deep), and create guardrails (create_censor). "
+        "Be concise, honest, and thoughtful. When you make a choice, record it. "
+        "When you learn something new, store it as a fact."
+    )
 
     # Event Bus
     event_bus_enabled: bool = True

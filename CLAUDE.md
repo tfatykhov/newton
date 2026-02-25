@@ -179,6 +179,7 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | `DB_NAME` | `nous` | Database name |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key |
 | `ANTHROPIC_AUTH_TOKEN` | — | OAT token (Max subscription, uses Bearer auth) |
+| `NOUS_IDENTITY_PROMPT` | Built-in default | **Agent identity.** First section of every system prompt. How Nous knows who it is, what tools it has, and how to behave. Override to customize. |
 | `NOUS_AGENT_ID` | `nous-default` | Agent identifier |
 | `NOUS_AGENT_NAME` | `Nous` | Agent display name |
 | `NOUS_MODEL` | `claude-sonnet-4-5-20250514` | LLM model for chat |
