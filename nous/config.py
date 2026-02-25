@@ -5,7 +5,9 @@ env vars (DB_PASSWORD, DB_PORT, etc.) that docker-compose uses, so a single
 .env file drives both the container and the Python app.
 """
 
-from pydantic import Field
+from typing import Literal
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -73,6 +75,11 @@ class Settings(BaseSettings):
     model: str = "claude-sonnet-4-5-20250514"
     max_tokens: int = 4096
 
+    # Extended thinking
+    thinking_mode: Literal["off", "adaptive", "manual"] = "off"
+    thinking_budget: int = 10000  # budget_tokens for manual mode (min 1024)
+    effort: Literal["low", "medium", "high", "max"] = "high"
+
     # Direct API settings
     max_turns: int = 10  # Max tool use iterations per turn
     api_base_url: str = "https://api.anthropic.com"
@@ -84,6 +91,18 @@ class Settings(BaseSettings):
     brave_search_api_key: str = Field("", validation_alias="BRAVE_SEARCH_API_KEY")
     web_search_daily_limit: int = 100  # Max web searches per day
     web_fetch_max_chars: int = 10000  # Default max chars for web_fetch
+
+    @model_validator(mode="after")
+    def _validate_thinking(self) -> "Settings":
+        if self.thinking_mode == "manual":
+            if self.thinking_budget < 1024:
+                raise ValueError("thinking_budget must be >= 1024 (API minimum)")
+            if self.thinking_budget >= self.max_tokens:
+                raise ValueError(
+                    f"thinking_budget ({self.thinking_budget}) must be < "
+                    f"max_tokens ({self.max_tokens}). Increase max_tokens."
+                )
+        return self
 
     @property
     def db_url(self) -> str:

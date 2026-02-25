@@ -108,11 +108,21 @@ def _parse_sse_event(data: dict[str, Any]) -> StreamEvent | None:
     if event_type == "content_block_start":
         block = data.get("content_block", {})
         block_index = data.get("index", 0)
-        if block.get("type") == "tool_use":
+        block_type = block.get("type")
+        if block_type == "tool_use":
             return StreamEvent(
                 type="tool_start",
                 tool_name=block.get("name", ""),
                 tool_id=block.get("id", ""),
+                block_index=block_index,
+            )
+        if block_type == "thinking":
+            return StreamEvent(type="thinking_start", block_index=block_index)
+        if block_type == "redacted_thinking":
+            # redacted_thinking carries data in the start event, no deltas follow
+            return StreamEvent(
+                type="redacted_thinking",
+                text=block.get("data", ""),
                 block_index=block_index,
             )
         return StreamEvent(type="text_block_start", block_index=block_index)
@@ -120,12 +130,25 @@ def _parse_sse_event(data: dict[str, Any]) -> StreamEvent | None:
     if event_type == "content_block_delta":
         delta = data.get("delta", {})
         block_index = data.get("index", 0)
-        if delta.get("type") == "text_delta":
+        delta_type = delta.get("type")
+        if delta_type == "text_delta":
             return StreamEvent(type="text_delta", text=delta.get("text", ""))
-        if delta.get("type") == "input_json_delta":
+        if delta_type == "input_json_delta":
             return StreamEvent(
                 type="tool_input_delta",
                 text=delta.get("partial_json", ""),
+                block_index=block_index,
+            )
+        if delta_type == "thinking_delta":
+            return StreamEvent(
+                type="thinking_delta",
+                text=delta.get("thinking", ""),
+                block_index=block_index,
+            )
+        if delta_type == "signature_delta":
+            return StreamEvent(
+                type="signature_delta",
+                text=delta.get("signature", ""),
                 block_index=block_index,
             )
         return None
@@ -200,18 +223,19 @@ class AgentRunner:
         # plus special beta headers. Regular API keys use x-api-key.
         api_key = settings.anthropic_api_key or ""
         auth_token = settings.anthropic_auth_token or ""
+        is_oat = False
 
         if auth_token:
             # Explicit auth token always uses Bearer
             headers["authorization"] = f"Bearer {auth_token}"
             if "sk-ant-oat" in auth_token:
-                headers["anthropic-beta"] = "oauth-2025-04-20"
+                is_oat = True
                 headers["anthropic-dangerous-direct-browser-access"] = "true"
         elif api_key:
             if "sk-ant-oat" in api_key:
                 # OAT token passed as API key - use Bearer + required beta headers
+                is_oat = True
                 headers["authorization"] = f"Bearer {api_key}"
-                headers["anthropic-beta"] = "oauth-2025-04-20"
                 headers["anthropic-dangerous-direct-browser-access"] = "true"
             else:
                 headers["x-api-key"] = api_key
@@ -220,6 +244,15 @@ class AgentRunner:
                 "Neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN is set -- "
                 "API calls will fail"
             )
+
+        # Build beta features list (combines OAT + interleaved thinking)
+        beta_features: list[str] = []
+        if is_oat:
+            beta_features.append("oauth-2025-04-20")
+        if settings.thinking_mode != "off":
+            beta_features.append("interleaved-thinking-2025-05-14")
+        if beta_features:
+            headers["anthropic-beta"] = ",".join(beta_features)
 
         # Create httpx client with timeout and connection limits
         timeout = httpx.Timeout(
@@ -240,7 +273,6 @@ class AgentRunner:
             limits=limits,
         )
 
-        is_oat = "sk-ant-oat" in (auth_token or api_key)
         auth_type = "OAT/subscription" if is_oat else ("Bearer token" if auth_token else "API key")
         logger.info("httpx client initialized (auth: %s)", auth_type)
 
@@ -347,11 +379,14 @@ class AgentRunner:
                     f"Here is a conversation to review:\n\n{history_text}\n\n"
                     f"{self.REFLECTION_PROMPT}"
                 )
-                # P1-9: Call _call_api directly, no tool loop needed for reflection
+                # P1-9: Call _call_api directly, no tool loop needed for reflection.
+                # skip_thinking=True: reflection is a simple summary, no need for
+                # extended thinking budget.
                 api_response = await self._call_api(
                     system_prompt="You are reviewing a conversation to extract lessons learned.",
                     messages=[{"role": "user", "content": reflection_prompt}],
                     tools=None,
+                    skip_thinking=True,
                 )
                 # Extract text from response
                 reflection = self._extract_text(api_response.content)
@@ -373,10 +408,12 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        skip_thinking: bool = False,
     ) -> dict[str, Any]:
         """Build Anthropic Messages API request payload.
 
         Shared by _call_api and _call_api_stream to avoid divergence.
+        skip_thinking=True omits thinking params (for utility calls like reflection).
         """
         payload: dict[str, Any] = {
             "model": self._settings.model,
@@ -394,6 +431,21 @@ class AgentRunner:
             payload["tools"] = tools
         if stream:
             payload["stream"] = True
+
+        # Extended thinking (skip for utility calls like reflection)
+        if not skip_thinking:
+            if self._settings.thinking_mode == "adaptive":
+                payload["thinking"] = {"type": "adaptive"}
+            elif self._settings.thinking_mode == "manual":
+                payload["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": self._settings.thinking_budget,
+                }
+
+        # Effort parameter (works with or without thinking; "high" is API default)
+        if self._settings.effort != "high":
+            payload["output_config"] = {"effort": self._settings.effort}
+
         return payload
 
     async def _call_api(
@@ -401,16 +453,18 @@ class AgentRunner:
         system_prompt: str,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+        skip_thinking: bool = False,
     ) -> ApiResponse:
         """Call Anthropic Messages API with retry for 429/500/529.
 
         Returns parsed ApiResponse with content blocks and stop_reason.
         Raises RuntimeError on persistent errors.
+        skip_thinking=True omits thinking params (for utility calls like reflection).
         """
         if not self._http:
             raise RuntimeError("httpx client not initialized -- call start() first")
 
-        payload = self._build_api_payload(system_prompt, messages, tools)
+        payload = self._build_api_payload(system_prompt, messages, tools, skip_thinking=skip_thinking)
 
         # Simple retry: 1x for 429/500/529
         last_error: Exception | None = None
@@ -552,9 +606,11 @@ class AgentRunner:
 
         try:
             for turn in range(self._settings.max_turns):
+                # Unified block accumulator: keyed by block_index, preserves
+                # original order for thinking block preservation (007 Phase D).
+                all_blocks: dict[int, dict[str, Any]] = {}
                 text_parts: list[str] = []
                 tool_calls: list[dict[str, Any]] = []
-                block_accumulators: dict[int, dict[str, Any]] = {}
                 stop_reason = ""
 
                 async for event in self._call_api_stream(
@@ -571,12 +627,51 @@ class AgentRunner:
                         if event.usage:
                             total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
 
+                    # -- Thinking blocks (not yielded to client) --
+                    elif event.type == "thinking_start":
+                        all_blocks[event.block_index] = {
+                            "type": "thinking",
+                            "thinking_parts": [],
+                            "signature": "",
+                        }
+
+                    elif event.type == "redacted_thinking":
+                        # Complete block — data arrives in start event
+                        all_blocks[event.block_index] = {
+                            "type": "redacted_thinking",
+                            "data": event.text,
+                        }
+
+                    elif event.type == "thinking_delta":
+                        block = all_blocks.get(event.block_index)
+                        if block and block["type"] == "thinking":
+                            block["thinking_parts"].append(event.text)
+
+                    elif event.type == "signature_delta":
+                        block = all_blocks.get(event.block_index)
+                        if block and block["type"] == "thinking":
+                            block["signature"] = event.text
+
+                    # -- Text blocks --
+                    elif event.type == "text_block_start":
+                        all_blocks[event.block_index] = {
+                            "type": "text",
+                            "text_parts": [],
+                        }
+
                     elif event.type == "text_delta":
                         text_parts.append(event.text)
+                        # Also track in block for content reconstruction
+                        for idx in sorted(all_blocks, reverse=True):
+                            if all_blocks[idx]["type"] == "text":
+                                all_blocks[idx]["text_parts"].append(event.text)
+                                break
                         yield event
 
+                    # -- Tool blocks --
                     elif event.type == "tool_start":
-                        block_accumulators[event.block_index] = {
+                        all_blocks[event.block_index] = {
+                            "type": "tool_use",
                             "id": event.tool_id,
                             "name": event.tool_name,
                             "input_parts": [],
@@ -584,19 +679,19 @@ class AgentRunner:
                         yield event
 
                     elif event.type == "tool_input_delta":
-                        acc = block_accumulators.get(event.block_index)
-                        if acc:
-                            acc["input_parts"].append(event.text)
+                        block = all_blocks.get(event.block_index)
+                        if block and block["type"] == "tool_use":
+                            block["input_parts"].append(event.text)
 
                     elif event.type == "block_stop":
-                        acc = block_accumulators.pop(event.block_index, None)
-                        if acc:
-                            input_json = "".join(acc["input_parts"])
+                        block = all_blocks.get(event.block_index)
+                        if block and block["type"] == "tool_use":
+                            input_json = "".join(block["input_parts"])
                             try:
-                                acc["input"] = json.loads(input_json) if input_json else {}
+                                block["input"] = json.loads(input_json) if input_json else {}
                             except json.JSONDecodeError:
-                                acc["input"] = {}
-                            tool_calls.append(acc)
+                                block["input"] = {}
+                            tool_calls.append(block)
 
                     elif event.type == "done":
                         stop_reason = event.stop_reason
@@ -609,17 +704,34 @@ class AgentRunner:
                     response_text = "".join(text_parts)
                     break
 
-                # Build assistant message with tool_use content blocks
+                # Build assistant message preserving ALL blocks in index order
+                # (critical for thinking block preservation with interleaved thinking)
                 content_blocks: list[dict[str, Any]] = []
-                if text_parts:
-                    content_blocks.append({"type": "text", "text": "".join(text_parts)})
-                for tc in tool_calls:
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": tc["id"],
-                        "name": tc["name"],
-                        "input": tc["input"],
-                    })
+                for idx in sorted(all_blocks):
+                    block = all_blocks[idx]
+                    if block["type"] == "thinking":
+                        content_blocks.append({
+                            "type": "thinking",
+                            "thinking": "".join(block["thinking_parts"]),
+                            "signature": block["signature"],
+                        })
+                    elif block["type"] == "redacted_thinking":
+                        content_blocks.append({
+                            "type": "redacted_thinking",
+                            "data": block["data"],
+                        })
+                    elif block["type"] == "text":
+                        content_blocks.append({
+                            "type": "text",
+                            "text": "".join(block["text_parts"]),
+                        })
+                    elif block["type"] == "tool_use":
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": block["id"],
+                            "name": block["name"],
+                            "input": block.get("input", {}),
+                        })
                 messages.append({"role": "assistant", "content": content_blocks})
 
                 # Execute tools (P1-2: all results in single user message)
