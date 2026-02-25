@@ -62,7 +62,10 @@ def create_app(
 
         try:
             debug = body.get("debug", False)
-            response_text, turn_context, usage = await runner.run_turn(session_id, message)
+            platform = body.get("platform")
+            response_text, turn_context, usage = await runner.run_turn(
+                session_id, message, platform=platform,
+            )
             result: dict[str, Any] = {
                 "response": response_text,
                 "session_id": session_id,
@@ -97,10 +100,11 @@ def create_app(
             return JSONResponse({"error": "Missing required field: message"}, status_code=400)
 
         session_id = body.get("session_id") or str(uuid4())
+        platform = body.get("platform")
 
         async def event_generator():
             try:
-                async for event in runner.stream_chat(session_id, message):
+                async for event in runner.stream_chat(session_id, message, platform=platform):
                     event_data: dict[str, Any] = {
                         "type": event.type,
                         "text": event.text,
