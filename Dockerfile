@@ -2,9 +2,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install psql client and curl (no Node.js needed)
+# Install system tools for agent use
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    postgresql-client curl && \
+    postgresql-client curl wget \
+    git jq tree ripgrep \
+    sqlite3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Create workspace directory
