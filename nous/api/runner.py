@@ -627,13 +627,14 @@ class AgentRunner:
                         if event.usage:
                             total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
 
-                    # -- Thinking blocks (not yielded to client) --
+                    # -- Thinking blocks (yielded to client for thinking indicators) --
                     elif event.type == "thinking_start":
                         all_blocks[event.block_index] = {
                             "type": "thinking",
                             "thinking_parts": [],
                             "signature": "",
                         }
+                        yield event
 
                     elif event.type == "redacted_thinking":
                         # Complete block — data arrives in start event
@@ -641,11 +642,13 @@ class AgentRunner:
                             "type": "redacted_thinking",
                             "data": event.text,
                         }
+                        yield event
 
                     elif event.type == "thinking_delta":
                         block = all_blocks.get(event.block_index)
                         if block and block["type"] == "thinking":
                             block["thinking_parts"].append(event.text)
+                        yield event
 
                     elif event.type == "signature_delta":
                         block = all_blocks.get(event.block_index)

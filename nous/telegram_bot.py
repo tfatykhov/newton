@@ -224,10 +224,28 @@ class StreamingMessage:
         self._min_interval = 1.2  # N6: ~20 edits/msg limit
         self._pending = False
         self._usage: dict[str, int] | None = None  # Token usage stats
+        self._thinking_text = ""           # accumulated thinking content
+        self._thinking_count = 0           # number of thinking blocks seen
+        self._thinking_displayed = False   # whether we've shown an indicator
 
     def set_usage(self, usage: dict[str, int]) -> None:
         """Set token usage for the footer."""
         self._usage = usage
+
+    async def start_thinking(self) -> None:
+        """Called on thinking_start event."""
+        self._thinking_count += 1
+        self._thinking_text = ""
+        self._thinking_displayed = False
+
+    async def append_thinking(self, text: str) -> None:
+        """Called on thinking_delta event."""
+        self._thinking_text += text
+        # Show preview after accumulating enough text (first 100 chars)
+        if not self._thinking_displayed and len(self._thinking_text) >= 50:
+            self.text = self._build_display_text()
+            await self._send_or_edit()
+            self._thinking_displayed = True
 
     async def append_text(self, text: str) -> None:
         """Append text delta to the base text and update display."""
@@ -250,8 +268,21 @@ class StreamingMessage:
         await self._send_or_edit()
 
     def _build_display_text(self) -> str:
-        """Build display text: base text + collapsed tool indicators + usage footer."""
-        parts = [self._base_text] if self._base_text else []
+        """Build display text: thinking indicator + base text + collapsed tool indicators."""
+        parts = []
+
+        # Thinking indicator (before response text)
+        if self._thinking_count > 0 and self._thinking_text:
+            preview = self._thinking_text[:100].replace("\n", " ").strip()
+            if len(self._thinking_text) > 100:
+                preview += "..."
+            if self._thinking_count > 1:
+                parts.append(f"\U0001f4ad Thinking ({self._thinking_count}): {preview}")
+            else:
+                parts.append(f"\U0001f4ad {preview}")
+
+        if self._base_text:
+            parts.append(self._base_text)
 
         if self._tool_counts:
             indicators: list[str] = []
@@ -269,13 +300,37 @@ class StreamingMessage:
 
     async def finalize(self) -> None:
         """Send final version of message with HTML formatting and usage footer."""
-        # Clear tool indicators for final message, keep only base text + footer
-        self._tool_counts.clear()
-        self.text = self._build_display_text()
+        parts = []
 
-        # Append usage footer if available
+        # Thinking summary (before response text)
+        if self._thinking_count > 0:
+            if self._thinking_text:
+                preview = self._thinking_text[:100].replace("\n", " ").strip()
+                if len(self._thinking_text) > 100:
+                    preview += "..."
+                if self._thinking_count > 1:
+                    parts.append(f"\U0001f4ad Thinking ({self._thinking_count}): {preview}")
+                else:
+                    parts.append(f"\U0001f4ad {preview}")
+            else:
+                # Redacted thinking — no content available
+                parts.append("\U0001f4ad Thinking... (redacted)")
+
+        # Tool summary
+        if self._tool_counts:
+            total = sum(self._tool_counts.values())
+            parts.append(f"\U0001f527 Ran {total} tool{'s' if total > 1 else ''}")
+
+        # Response text
+        if self._base_text:
+            parts.append(self._base_text)
+
+        # Usage footer
         if self._usage:
-            self.text += f"\n\n{format_usage_footer(self._usage)}"
+            parts.append(format_usage_footer(self._usage))
+
+        self.text = "\n\n".join(parts)
+        self._tool_counts.clear()
 
         await self._send_or_edit(parse_mode="HTML")
 
@@ -522,6 +577,13 @@ class NousTelegramBot:
                     if event.get("type") == "text_delta":
                         last_text_time = time.time()
                         await streamer.append_text(event.get("text", ""))
+                    elif event.get("type") == "thinking_start":
+                        await streamer.start_thinking()
+                    elif event.get("type") == "thinking_delta":
+                        last_text_time = time.time()
+                        await streamer.append_thinking(event.get("text", ""))
+                    elif event.get("type") == "redacted_thinking":
+                        await streamer.start_thinking()
                     elif event.get("type") == "tool_start":
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
                     elif event.get("type") == "error":
