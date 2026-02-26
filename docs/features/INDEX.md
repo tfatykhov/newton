@@ -24,6 +24,11 @@
 | F009 | [Async Subtasks](F009-async-subtasks.md) | Planned | Background task queue — parallel execution, non-blocking chat, Postgres-backed workers |
 | F010 | [Memory Improvements](F010-memory-improvements.md) | ✅ Shipped | Episode summaries, clean decision descriptions, proactive fact learning, user-tagged episodes |
 
+### P0: Identity & Context
+| Feature | Name | Status | Description |
+|---------|------|--------|-------------|
+| F018 | [Agent Identity](F018-agent-identity.md) | ✅ Shipped | DB-backed identity — initiation protocol, versioned sections, tiered context model |
+
 ### Implementation Specs
 
 All shipped implementation specs with PR references:
@@ -50,17 +55,10 @@ All shipped implementation specs with PR references:
 | 007.2 | Topic-Aware Recall | ✅ Shipped | #55 |
 | 007.3 | Improve _is_informational() | ✅ Shipped | #55 |
 | 007.4 | Fix Unpopulated Columns | ✅ Shipped | #55 |
-| 007.5 | Recall Min Threshold | ⏸ Reverted | #59 — needs F018 (tiered context) first |
+| 007.5 | Recall Min Threshold | ⏸ Reverted | #59 — superseded by 008 |
+| 008 | Agent Identity & Tiered Context | ✅ Shipped | #60, #61, #62 — F018 identity + tiered context + API |
 
-### Phase 1 — Foundation (next to build)
-
-| Feature | Name | Priority | Description |
-|---------|------|----------|-------------|
-| F018 | [Agent Identity](F018-agent-identity.md) | **P0** | DB-backed identity layer — user prefs, agent character, boundaries. Enables tiered context. |
-| 007.5 | Tiered Context Model | **P0** | Redesign: Tier 1 (always-on from F018), Tier 2 (session), Tier 3 (search + threshold). Depends on F018. |
-| #57 | Recall Min Threshold | **P0** | Re-apply min_score filtering to Tier 3 only (safe once identity facts are in Tier 1). |
-
-### Phase 2 — Quality
+### Phase 2 — Quality (next to build)
 
 | Feature | Name | Priority | Description |
 |---------|------|----------|-------------|
@@ -89,11 +87,11 @@ All shipped implementation specs with PR references:
 
 ## Stats
 
-- **Total source:** ~13,800 lines of Python
-- **Test count:** 638 tests across 38 test files
-- **Database:** 18 tables across 3 schemas (brain, heart, system)
-- **Tools:** 8 agent tools (record_decision, recall_deep, learn_fact, create_censor, bash, read_file, write_file, web_search, web_fetch)
-- **Endpoints:** 12 REST endpoints + MCP server + Telegram bot
+- **Total source:** ~14,500 lines of Python
+- **Test count:** 671 tests across 41 test files
+- **Database:** 19 tables across 3 schemas (brain, heart, system)
+- **Tools:** 10 agent tools (record_decision, recall_deep, learn_fact, create_censor, store_identity, complete_initiation, bash, read_file, write_file, web_search, web_fetch)
+- **Endpoints:** 15 REST endpoints + MCP server + Telegram bot
 
 ## Research Notes
 
@@ -125,4 +123,4 @@ All shipped implementation specs with PR references:
 |--------|--------|---------|
 | `brain` (7) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
 | `heart` (7) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory | Memory system |
-| `system` (4) | agents, frames, events, context_metrics | Config, tracking |
+| `system` (5) | agents, agent_identity, frames, events, context_metrics | Config, tracking, identity |
