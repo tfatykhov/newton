@@ -585,6 +585,72 @@ class TestInformationalDetection:
         )
         assert layer._is_informational(result) is True
 
+    # --- 007.3: Expanded detection tests ---
+
+    def test_git_status_detected(self, layer):
+        """Response about git pull -> informational."""
+        result = MockTurnResult(
+            response_text="Repo pulled — now at efedacd on main with 3 new commits.",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_acknowledgment_detected(self, layer):
+        """Short acknowledgment -> informational."""
+        result = MockTurnResult(
+            response_text="Got it, will do.",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_heres_what_detected(self, layer):
+        """'Here's what I found' -> informational."""
+        result = MockTurnResult(
+            response_text="Here's what I found in the codebase about the database layer...",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_emoji_header_detected(self, layer):
+        """Emoji + header (status dump) -> informational."""
+        result = MockTurnResult(
+            response_text="\U0001f916 Nous — Current Status\n\U0001f7e2 Agent is running...",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_short_response_no_tools_detected(self, layer):
+        """Very short response without tools -> informational."""
+        result = MockTurnResult(
+            response_text="Sure, done.",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_short_response_with_tools_not_filtered(self, layer):
+        """Short response WITH tools -> NOT informational (tool did real work)."""
+        result = MockTurnResult(
+            response_text="Done.",
+            tool_results=[MockToolResult(tool_name="bash")],
+        )
+        assert layer._is_informational(result) is False
+
+    def test_list_dominated_detected(self, layer):
+        """Response that is mostly a list -> informational."""
+        result = MockTurnResult(
+            response_text="Available endpoints:\n- GET /status\n- POST /chat\n- DELETE /chat/{id}\n- GET /health\n- GET /facts",
+        )
+        assert layer._is_informational(result) is True
+
+    def test_real_decision_not_filtered(self, layer):
+        """Response with decision language -> NOT informational."""
+        result = MockTurnResult(
+            response_text="I decided to use PostgreSQL over Redis because it supports complex queries and we need ACID guarantees for the decision log.",
+        )
+        assert layer._is_informational(result) is False
+
+    def test_recall_pattern_detected(self, layer):
+        """'I recall' pattern -> informational."""
+        result = MockTurnResult(
+            response_text="I recall that the last time we deployed, the migration took about 15 minutes.",
+        )
+        assert layer._is_informational(result) is True
+
     # Test 20: No decision_id skips informational check
     @pytest.mark.asyncio
     async def test_no_decision_id_no_deliberation(self, layer):
