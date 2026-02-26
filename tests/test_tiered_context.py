@@ -7,7 +7,6 @@ Verifies:
 - Budget includes user_profile field
 """
 
-import uuid
 
 import pytest
 import pytest_asyncio

@@ -24,6 +24,9 @@ from nous.heart.search import apply_frame_boost
 
 logger = logging.getLogger(__name__)
 
+# Tier 1 fact categories — loaded by category (always-on), excluded from Tier 3 search
+TIER1_FACT_CATEGORIES = ["preference", "person", "rule"]
+
 
 class ContextEngine:
     """Assembles context from Brain and Heart within token budgets."""
@@ -130,7 +133,7 @@ class ContextEngine:
         if budget.user_profile > 0:
             try:
                 profile_facts = await self._heart.list_facts_by_category(
-                    categories=["preference", "person", "rule"],
+                    categories=TIER1_FACT_CATEGORIES,
                     active_only=True,
                     session=session,
                 )
@@ -251,7 +254,7 @@ class ContextEngine:
                 # Tier 3: exclude Tier 1 categories from semantic search
                 facts = await self._heart.search_facts(
                     q_text, limit=limit, session=session,
-                    exclude_categories=["preference", "person", "rule"],
+                    exclude_categories=TIER1_FACT_CATEGORIES,
                 )
                 if facts:
                     # Tier 3: min_score threshold
