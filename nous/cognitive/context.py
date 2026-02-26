@@ -182,23 +182,12 @@ class ContextEngine:
         # 007.2: Topic-enhanced default query — prefix with current_topic
         _default_query = f"{current_topic}: {input_text}" if current_topic else input_text
 
-        # 007.5: Minimum relevance thresholds — don't fill budget with noise
-        _min_scores = {
-            "decision": 0.3,
-            "fact": 0.25,
-            "procedure": 0.3,
-            "episode": 0.3,
-        }
-
         # 5. Decisions (F26: skip_types is primary skip mechanism)
         if budget.decisions > 0 and "decision" not in skip_types:
             try:
                 limit = _limits.get("decision", 5)
                 q_text = _query_texts.get("decision", _default_query)
                 decisions = await self._brain.query(q_text, limit=limit, session=session)
-                if decisions:
-                    # 007.5: Filter below minimum relevance threshold
-                    decisions = [d for d in decisions if (d.score or 0) >= _min_scores["decision"]]
                 if decisions:
                     # 007.2: Diversity filter — use category as topic key
                     decisions = self._enforce_diversity(decisions, "category", max_per_subject=3)
@@ -232,9 +221,6 @@ class ContextEngine:
                 limit = _limits.get("fact", 5)
                 q_text = _query_texts.get("fact", _default_query)
                 facts = await self._heart.search_facts(q_text, limit=limit, session=session)
-                if facts:
-                    # 007.5: Filter below minimum relevance threshold
-                    facts = [f for f in facts if (f.score or 0) >= _min_scores["fact"]]
                 if facts:
                     # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
@@ -277,9 +263,6 @@ class ContextEngine:
                 q_text = _query_texts.get("procedure", _default_query)
                 procedures = await self._heart.search_procedures(q_text, limit=limit, session=session)
                 if procedures:
-                    # 007.5: Filter below minimum relevance threshold
-                    procedures = [p for p in procedures if (p.score or 0) >= _min_scores["procedure"]]
-                if procedures:
                     # F10: apply_frame_boost
                     procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
 
@@ -313,9 +296,6 @@ class ContextEngine:
                 limit = _limits.get("episode", 5)
                 q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
-                if episodes:
-                    # 007.5: Filter below minimum relevance threshold
-                    episodes = [e for e in episodes if (e.score or 0) >= _min_scores["episode"]]
                 if episodes:
                     # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
