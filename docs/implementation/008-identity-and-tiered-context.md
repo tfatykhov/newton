@@ -127,43 +127,170 @@ class IdentityManager:
         return "\n\n".join(parts)
 ```
 
-#### A3. Seed from Environment + Existing Facts
+#### A3. Initiation Protocol (replaces static seeding)
 
-On first startup (no identity rows in DB):
+Instead of silently seeding from env vars, Nous runs an **interactive first-conversation protocol** when no identity exists in the DB. This is how Nous and its user get to know each other.
+
+##### Detection
 
 ```python
-async def seed(self, identity_prompt: str, heart: Heart, session: AsyncSession):
-    """Seed identity table from env var + existing user facts."""
-    existing = await self.get_current(session=session)
-    if existing:
-        return  # Already seeded
+# cognitive/layer.py — pre_turn()
 
-    # 1. Seed character from NOUS_IDENTITY_PROMPT
-    await self.update_section("character", identity_prompt, updated_by="system", session=session)
-
-    # 2. Migrate user preference/person facts to identity
-    user_facts = await heart.search_facts("", category="preference", session=session)
-    person_facts = await heart.search_facts("", category="person", session=session)
-    rule_facts = await heart.search_facts("", category="rule", session=session)
-
-    if user_facts or person_facts:
-        prefs = "\n".join(f"- {f.content}" for f in user_facts)
-        person = "\n".join(f"- {f.content}" for f in person_facts)
-        rules = "\n".join(f"- {f.content}" for f in rule_facts)
-        content = ""
-        if person:
-            content += f"### User\n{person}\n\n"
-        if prefs:
-            content += f"### Preferences\n{prefs}\n\n"
-        if rules:
-            content += f"### Rules\n{rules}"
-        await self.update_section("preferences", content.strip(), updated_by="system", session=session)
-
-    # 3. Seed empty boundaries from censors
-    await self.update_section("boundaries",
-        "See Active Censors section for current safety rules.",
-        updated_by="system", session=session)
+async def _check_initiation(self, agent_id: str, session: AsyncSession) -> bool:
+    """Check if identity exists. If not, trigger initiation protocol."""
+    identity = await self._identity_manager.get_current(session=session)
+    return len(identity) == 0  # No sections = first run
 ```
+
+On first user message, if `_check_initiation()` returns True, the cognitive layer injects the initiation system prompt instead of normal context.
+
+##### Initiation System Prompt
+
+```python
+INITIATION_PROMPT = """You are a new AI agent running for the first time. You have no identity yet.
+Your job is to introduce yourself and learn about your user through natural conversation.
+
+You MUST cover these topics (in natural order, not as a checklist):
+
+1. **Your name** — Your default name is "Nous" (Greek for mind). Ask if they'd like to
+   keep it or give you a different name. Suggest a few fun alternatives if they're unsure.
+
+2. **Their name** — What should you call them?
+
+3. **Their location & timezone** — Helps with weather, time references, local context.
+
+4. **Their preferences** — Temperature units (Celsius/Fahrenheit), communication style
+   (concise vs detailed), formatting preferences.
+
+5. **Your personality** — Ask what vibe they want: formal/professional, casual/friendly,
+   technical/precise, playful/witty. Offer to blend styles.
+
+6. **Proactivity level** — Should you volunteer information and suggestions, or wait to
+   be asked? Should you check in proactively or stay quiet until needed?
+
+7. **Initial censors/boundaries** — Are there topics to avoid? Data that should never be
+   stored? Actions that need approval first?
+
+As you learn each piece of information, call the `store_identity` tool to save it.
+When all topics are covered, call `complete_initiation` to finish.
+
+Be warm, natural, and conversational — NOT robotic. This is a first meeting, not a form.
+Show personality from the start. Use humor if it fits."""
+```
+
+##### Initiation Tools
+
+Two special tools available only during initiation:
+
+```python
+# nous/identity/tools.py
+
+@tool
+async def store_identity(section: str, content: str) -> str:
+    """Store a piece of identity information.
+
+    Args:
+        section: One of: character, preferences, boundaries, user_profile
+        content: The information to store
+    """
+    await identity_manager.update_section(section, content, updated_by="initiation")
+    return f"Stored {section} identity."
+
+@tool
+async def complete_initiation() -> str:
+    """Mark initiation as complete. Call when all topics have been covered."""
+    await identity_manager.update_section(
+        "status", "initiated", updated_by="system"
+    )
+    return "Initiation complete! I'm ready to work."
+```
+
+##### Conversation Flow Example
+
+```
+Nous:  Hey! 👋 I just came online for the first time. I'm Nous — it's Greek
+       for "mind," which felt right for an AI that's trying to build one.
+
+       Before we dive in, I'd love to get to know you. And honestly, I'm still
+       figuring out who I am too — so maybe we can sort that out together.
+
+       First things first — should I stay "Nous," or do you have something
+       better in mind?
+
+User:  Nous is fine actually
+
+Nous:  Nous it is! 🧠 And who do I have the pleasure of working with?
+
+User:  Tim
+
+Nous:  Good to meet you, Tim. Where are you based? Helps me with time zones,
+       weather, that kind of thing.
+
+User:  Silver Spring MD
+
+Nous:  East coast — noted. I'll use EST for time references.
+
+       Quick preference: Celsius or Fahrenheit?
+
+User:  Celsius
+
+Nous:  A person of culture. 🌡️
+
+       Now for the fun part — what kind of AI do you want me to be? I can be:
+       • 🎯 Technical and precise — straight to the point
+       • 💬 Casual and friendly — like a smart coworker
+       • 🧪 Curious and proactive — I'll dig into things on my own
+       • Mix of the above?
+
+User:  casual but technical when needed. be proactive.
+
+Nous:  Got it — casual default, technical when the work calls for it, and I
+       won't wait around to be useful.
+
+       Last thing — any guardrails I should know about? Topics to avoid,
+       data that should never be stored, actions I should always ask
+       before taking?
+
+User:  never store API keys or passwords. ask before sending emails.
+
+Nous:  Locked in:
+       🔒 Never store credentials
+       ✋ Ask before external communications
+
+       I think we're good! I know who you are, who I am, and how we work
+       together. Let's build something. What are you working on?
+```
+
+##### Identity Stored After Initiation
+
+```
+system.agent_identity rows:
+┌─────────────┬────────────────────────────────────────────────────┐
+│ section     │ content                                            │
+├─────────────┼────────────────────────────────────────────────────┤
+│ character   │ Name: Nous                                         │
+│             │ Personality: Casual and friendly, technical when    │
+│             │ needed. Proactive — volunteer info and suggestions. │
+├─────────────┼────────────────────────────────────────────────────┤
+│ preferences │ User: Tim                                          │
+│             │ Location: Silver Spring, MD                         │
+│             │ Timezone: EST (America/New_York)                    │
+│             │ Temperature: Celsius                                │
+│             │ Communication: Casual, emoji ok                     │
+├─────────────┼────────────────────────────────────────────────────┤
+│ boundaries  │ Never store API keys, tokens, or passwords.        │
+│             │ Ask before sending emails or external messages.     │
+├─────────────┼────────────────────────────────────────────────────┤
+│ status      │ initiated                                          │
+└─────────────┴────────────────────────────────────────────────────┘
+```
+
+##### Edge Cases
+
+- **Existing deployment (upgrade path):** If `heart.facts` already has `preference`/`person` facts but no identity rows, show a shorter initiation: "Hey, I know some things about you already — Tim, Silver Spring, Celsius. Want to confirm and fill in the gaps?"
+- **User skips questions:** Store what was given, mark initiation complete. Nous learns the rest organically through `learn_fact` over time.
+- **Multi-user:** Each `agent_id` gets its own initiation. Identity is per-agent, not global.
+- **Re-initiation:** A `/reinitiate` command can reset identity and re-run the protocol.
 
 ### Part B: Tiered Context Engine
 
@@ -356,32 +483,42 @@ No changes to existing tables. Existing `preference`/`person`/`rule` facts stay 
 |------|--------|-------|
 | `nous/storage/models.py` | AgentIdentity ORM model | +20 |
 | `nous/identity/__init__.py` | New package | +1 |
-| `nous/identity/manager.py` | IdentityManager + seeding | +120 |
+| `nous/identity/manager.py` | IdentityManager (CRUD + assemble) | +120 |
 | `nous/identity/schemas.py` | IdentitySection, AgentIdentity models | +30 |
+| `nous/identity/tools.py` | `store_identity` + `complete_initiation` tools | +40 |
+| `nous/identity/protocol.py` | Initiation prompt + detection logic | +60 |
 | `nous/heart/facts.py` | `list_by_category()` + `exclude_categories` param on search | +25 |
 | `nous/cognitive/context.py` | Tier 1 identity + user profile, Tier 3 thresholds | +40 |
+| `nous/cognitive/layer.py` | `_check_initiation()` + initiation routing | +20 |
 | `nous/cognitive/budget.py` | Add `user_profile` budget slot | +3 |
-| `nous/main.py` | Initialize IdentityManager, run seed on startup | +15 |
+| `nous/main.py` | Initialize IdentityManager | +10 |
 | `nous/api/rest.py` | GET /identity, PUT /identity/{section} endpoints | +30 |
 | `tests/test_identity.py` | Identity manager tests | +120 |
+| `tests/test_initiation.py` | Initiation protocol tests | +80 |
 | `tests/test_tiered_context.py` | Tiered context assembly tests | +100 |
-| `tests/test_recall_threshold.py` | Tier 3 threshold tests (from reverted 007.5) | +80 |
+| `tests/test_recall_threshold.py` | Tier 3 threshold tests | +80 |
 
-**Estimated:** ~585 lines new, ~40 lines modified
+**Estimated:** ~780 lines new, ~40 lines modified
 
 ## Implementation Order
 
+### PR 1 — Identity Foundation
 1. **A1** — ORM model + migration SQL
 2. **A2** — IdentityManager (CRUD)
-3. **A3** — Seed from env + existing facts
-4. **B4** — Budget update (add user_profile)
-5. **B1** — Tier 1 identity in context engine
-6. **B2** — Tier 1 user profile facts (list_by_category)
-7. **B3** — Tier 3 thresholds (re-apply 007.5 to non-Tier-1 facts)
-8. REST endpoints (GET/PUT identity)
-9. Tests
+3. **A3** — Initiation protocol (prompt, tools, detection)
+4. Tests for identity + initiation
 
-Steps 1-3 can be a first PR. Steps 4-7 are a second PR. Step 8 is a third.
+### PR 2 — Tiered Context
+5. **B4** — Budget update (add user_profile)
+6. **B1** — Tier 1 identity in context engine
+7. **B2** — Tier 1 user profile facts (list_by_category)
+8. **B3** — Tier 3 thresholds (re-apply 007.5 to non-Tier-1 facts)
+9. Tests for tiered context + threshold
+
+### PR 3 — API + Polish
+10. REST endpoints (GET/PUT identity, POST /reinitiate)
+11. Telegram `/identity` command to view current identity
+12. Edge case: upgrade path for existing deployments with facts but no identity
 
 ## Self-Evolution Guardrails (Future)
 
@@ -393,6 +530,8 @@ Not in this spec — deferred to F018 Phase 2:
 
 ## Open Questions
 
-1. Should `person`/`preference`/`rule` facts be deactivated in `heart.facts` after seeding identity, or kept as-is?
+1. Should `person`/`preference`/`rule` facts be deactivated in `heart.facts` after initiation, or kept as-is? (Recommendation: keep as-is — no data loss, Tier 1 reads by category anyway)
 2. Token budget for user_profile — 200 enough? Tim currently has 4 user facts (~80 tokens).
 3. Should identity be cached in memory (avoid DB hit every turn) with TTL invalidation?
+4. Should initiation create default censors (credential blocking) or only what the user explicitly mentions?
+5. How to handle the upgrade path when Nous already has facts but no identity? Short initiation vs auto-seed?
