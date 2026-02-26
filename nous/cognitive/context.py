@@ -55,6 +55,7 @@ class ContextEngine:
         conversation_messages: list[str] | None = None,
         retrieval_plan: RetrievalPlan | None = None,
         usage_tracker: UsageTracker | None = None,
+        identity_override: str | None = None,
     ) -> BuildResult:
         """Build system prompt + context sections within budget.
 
@@ -112,8 +113,10 @@ class ContextEngine:
             _conv_msgs = _conv_msgs[-budget.conversation_window :]
 
         # 1. Identity (always included)
-        if self._identity_prompt:
-            identity_text = self._truncate_to_budget(self._identity_prompt, budget.identity)
+        # 008: Use identity_override from DB if available, fall back to static
+        _effective_identity = identity_override or self._identity_prompt
+        if _effective_identity:
+            identity_text = self._truncate_to_budget(_effective_identity, budget.identity)
             sections.append(
                 ContextSection(
                     priority=1,

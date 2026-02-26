@@ -41,10 +41,29 @@ CREATE TABLE nous_system.agents (
     description TEXT,
     config JSONB NOT NULL DEFAULT '{}',
     active BOOLEAN DEFAULT TRUE,
+    is_initiated BOOLEAN DEFAULT FALSE,
     last_active TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------------
+-- nous_system.agent_identity — versioned identity sections
+-- ---------------------------------------------------------------------------
+CREATE TABLE nous_system.agent_identity (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id VARCHAR(100) NOT NULL REFERENCES nous_system.agents(id),
+    section VARCHAR(50) NOT NULL,
+    content TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by VARCHAR(50),
+    previous_version_id UUID REFERENCES nous_system.agent_identity(id)
+);
+
+CREATE UNIQUE INDEX idx_identity_agent_section_current
+    ON nous_system.agent_identity(agent_id, section) WHERE is_current = TRUE;  -- UNIQUE prevents duplicate current rows
 
 -- ---------------------------------------------------------------------------
 -- nous_system.frames — cognitive frame definitions

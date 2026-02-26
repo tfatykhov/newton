@@ -40,6 +40,7 @@ FRAME_TOOLS: dict[str, list[str]] = {
     "creative": ["learn_fact", "recall_deep", "write_file", "web_search"],
     "task": ["*"],  # All tools
     "debug": ["record_decision", "recall_deep", "bash", "read_file", "learn_fact", "web_search", "web_fetch"],
+    "initiation": ["store_identity", "complete_initiation"],
 }
 
 # Anthropic API version header (P0-1)
