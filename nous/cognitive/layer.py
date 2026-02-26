@@ -13,7 +13,9 @@ import logging
 import re
 from uuid import UUID
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
 from nous.brain.brain import Brain
 from nous.cognitive.context import ContextEngine
@@ -28,6 +30,7 @@ from nous.config import Settings
 from nous.events import Event, EventBus
 from nous.heart.heart import Heart
 from nous.heart.schemas import EpisodeInput, FactInput
+from nous.storage.models import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +145,16 @@ class CognitiveLayer:
 
         # 006: Transcript capture
         meta.transcript.append(f"User: {user_input[:500]}")
+
+        # 007.4: Update agents.last_active timestamp
+        try:
+            async with self._brain.db.session() as _session:
+                await _session.execute(
+                    sa_update(Agent).where(Agent.id == agent_id).values(last_active=func.now())
+                )
+                await _session.commit()
+        except Exception:
+            logger.debug("Failed to update last_active for agent %s", agent_id)
 
         # 2. FRAME — select cognitive frame (F5: agent_id first)
         try:

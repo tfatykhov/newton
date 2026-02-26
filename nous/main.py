@@ -69,11 +69,10 @@ async def create_components(settings: Settings) -> dict:
         bus = EventBus()
 
         # DB persistence adapter (P0-1 fix: correct signature — no agent_id/session_id kwargs)
+        # 007.4: Pass event.session_id to populate ORM column
         async def persist_to_db(event: Event) -> None:
             data = {**event.data}
-            if event.session_id:
-                data["session_id"] = event.session_id
-            await brain.emit_event(event.type, data)
+            await brain.emit_event(event.type, data, session_id=event.session_id)
 
         bus.set_db_persister(persist_to_db)
 

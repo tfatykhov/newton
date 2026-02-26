@@ -63,8 +63,12 @@ def create_app(
         try:
             debug = body.get("debug", False)
             platform = body.get("platform")
+            # 007.4: Extract optional user identity
+            user_id = body.get("user_id")
+            user_display_name = body.get("user_display_name")
             response_text, turn_context, usage = await runner.run_turn(
                 session_id, message, platform=platform,
+                user_id=user_id, user_display_name=user_display_name,
             )
             result: dict[str, Any] = {
                 "response": response_text,
@@ -101,10 +105,16 @@ def create_app(
 
         session_id = body.get("session_id") or str(uuid4())
         platform = body.get("platform")
+        # 007.4: Extract optional user identity
+        user_id = body.get("user_id")
+        user_display_name = body.get("user_display_name")
 
         async def event_generator():
             try:
-                async for event in runner.stream_chat(session_id, message, platform=platform):
+                async for event in runner.stream_chat(
+                    session_id, message, platform=platform,
+                    user_id=user_id, user_display_name=user_display_name,
+                ):
                     event_data: dict[str, Any] = {
                         "type": event.type,
                         "text": event.text,
