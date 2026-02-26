@@ -456,10 +456,13 @@ Total: ~350 tokens (vs 808 before, with Tim's prefs included)
 Total: ~850 tokens (similar to now, but all relevant)
 ```
 
-## Database Migration
+## Database Changes
+
+No changes to existing tables. Existing `preference`/`person`/`rule` facts stay in `heart.facts` — they're read by category, not migrated.
+
+### New table: `nous_system.agent_identity`
 
 ```sql
--- New table
 CREATE TABLE nous_system.agent_identity (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id VARCHAR(50) NOT NULL REFERENCES nous_system.agents(agent_id),
@@ -475,7 +478,24 @@ CREATE TABLE nous_system.agent_identity (
 CREATE INDEX idx_identity_agent_section ON nous_system.agent_identity(agent_id, section);
 ```
 
-No changes to existing tables. Existing `preference`/`person`/`rule` facts stay in `heart.facts` — they're read by category, not migrated.
+### Deployment (automatic — no manual SQL)
+
+Nous has an auto-migration system (`nous/storage/migrator.py`) that discovers `sql/migrations/*.sql` files on startup and applies them in order.
+
+**New installs:** Table added to `sql/init.sql` (runs on fresh DB setup).
+
+**Existing installs (upgrade):** New migration file `sql/migrations/008_agent_identity.sql` — auto-applied on next container restart. Tracked in `nous_system.schema_migrations`.
+
+```
+sql/
+├── init.sql                          ← add agent_identity here
+├── seed.sql
+└── migrations/
+    ├── 006_event_bus.sql             ← existing
+    └── 008_agent_identity.sql        ← NEW (auto-applied on startup)
+```
+
+Users just pull the new image and restart. Zero manual steps.
 
 ## Files Changed
 
