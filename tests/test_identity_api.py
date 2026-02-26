@@ -8,10 +8,14 @@ Verifies:
 - Telegram /identity command (integration)
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from nous.brain.brain import Brain
+from nous.cognitive import CognitiveLayer
 from nous.identity.manager import IdentityManager, VALID_SECTIONS
 
 
@@ -21,9 +25,33 @@ from nous.identity.manager import IdentityManager, VALID_SECTIONS
 
 
 @pytest_asyncio.fixture
+async def brain(db, settings):
+    b = Brain(database=db, settings=settings)
+    yield b
+    await b.close()
+
+
+@pytest_asyncio.fixture
+async def cognitive(brain, heart, settings):
+    return CognitiveLayer(brain, heart, settings, identity_prompt="You are Nous.")
+
+
+@pytest_asyncio.fixture
 async def identity_manager(db, settings):
-    """IdentityManager for test agent."""
     return IdentityManager(db, settings.agent_id)
+
+
+@pytest.fixture
+def app(brain, heart, cognitive, db, settings, identity_manager):
+    """Create Starlette app with identity_manager wired in."""
+    from nous.api.rest import create_app
+    from nous.api.runner import AgentRunner
+
+    mock_runner = AsyncMock(spec=AgentRunner)
+    return create_app(
+        mock_runner, brain, heart, cognitive, db, settings,
+        identity_manager=identity_manager,
+    )
 
 
 @pytest_asyncio.fixture

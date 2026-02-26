@@ -466,20 +466,21 @@ class NousTelegramBot:
     async def _show_identity(self, chat_id: int) -> None:
         """Show current agent identity via REST API."""
         try:
+            from html import escape
             resp = await self._http.get(f"{self.nous_url}/identity", timeout=10)
-                if resp.status_code != 200:
-                    await self._send(chat_id, f"❌ Failed to fetch identity: {resp.text}")
-                    return
-                data = resp.json()
+            if resp.status_code != 200:
+                await self._send(chat_id, f"❌ Failed to fetch identity: {escape(resp.text)}")
+                return
+            data = resp.json()
 
             if not data.get("sections"):
                 await self._send(chat_id, "🧠 No identity configured yet. Start a conversation to begin initiation.")
                 return
 
-            parts = [f"🧠 <b>Agent Identity</b> ({data.get('agent_id', 'unknown')})"]
+            parts = [f"🧠 <b>Agent Identity</b> ({escape(str(data.get('agent_id', 'unknown')))})"]
             parts.append(f"Initiated: {'✅' if data.get('is_initiated') else '❌'}\n")
             for section, content in data.get("sections", {}).items():
-                parts.append(f"<b>{section.title()}</b>\n{content}")
+                parts.append(f"<b>{escape(section.title())}</b>\n{escape(content)}")
             await self._send(chat_id, "\n\n".join(parts), parse_mode="HTML")
         except Exception as e:
             await self._send(chat_id, f"❌ Error: {e}")
