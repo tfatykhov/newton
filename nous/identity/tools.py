@@ -76,5 +76,17 @@ def register_identity_tools(dispatcher: ToolDispatcher, identity_manager: Identi
             logger.error("Failed to complete initiation: %s", e)
             return _mcp_response(f"Error completing initiation: {e}")
 
-    dispatcher.register("store_identity", store_identity, STORE_IDENTITY_SCHEMA)
-    dispatcher.register("complete_initiation", complete_initiation, COMPLETE_INITIATION_SCHEMA)
+    # Register with flat schema format (type/properties/required/description)
+    # matching existing tools — dispatcher.tool_definitions() wraps with name + input_schema
+    dispatcher.register("store_identity", store_identity, {
+        "type": "object",
+        "description": STORE_IDENTITY_SCHEMA["description"],
+        "properties": STORE_IDENTITY_SCHEMA["input_schema"]["properties"],
+        "required": STORE_IDENTITY_SCHEMA["input_schema"]["required"],
+    })
+    dispatcher.register("complete_initiation", complete_initiation, {
+        "type": "object",
+        "description": COMPLETE_INITIATION_SCHEMA["description"],
+        "properties": COMPLETE_INITIATION_SCHEMA["input_schema"]["properties"],
+        "required": COMPLETE_INITIATION_SCHEMA["input_schema"].get("required", []),
+    })

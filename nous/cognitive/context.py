@@ -27,6 +27,16 @@ logger = logging.getLogger(__name__)
 # Tier 1 fact categories — loaded by category (always-on), excluded from Tier 3 search
 TIER1_FACT_CATEGORIES = ["preference", "person", "rule"]
 
+# Tier 3 min-score thresholds (hybrid search with embeddings)
+# When embeddings are unavailable, keyword-only scores are much lower (0.01-0.15)
+# so thresholds are skipped to avoid filtering everything out.
+TIER3_THRESHOLDS = {
+    "decision": 0.3,
+    "fact": 0.25,
+    "procedure": 0.3,
+    "episode": 0.3,
+}
+
 
 class ContextEngine:
     """Assembles context from Brain and Heart within token budgets."""
@@ -43,6 +53,9 @@ class ContextEngine:
     ) -> None:
         self._brain = brain
         self._heart = heart
+        # Tier 3 thresholds only apply with embeddings — keyword-only scores
+        # use ts_rank_cd which produces much lower values (0.01-0.15)
+        self._has_embeddings = getattr(brain, "embeddings", None) is not None
         self._settings = settings
         self._identity_prompt = identity_prompt
         self._deduplicator = deduplicator
@@ -216,9 +229,9 @@ class ContextEngine:
                 limit = _limits.get("decision", 5)
                 q_text = _query_texts.get("decision", _default_query)
                 decisions = await self._brain.query(q_text, limit=limit, session=session)
-                if decisions:
-                    # Tier 3: min_score threshold
-                    decisions = [d for d in decisions if (getattr(d, "score", None) or 0) >= 0.3]
+                if decisions and self._has_embeddings:
+                    # Tier 3: min_score threshold (only with embeddings — keyword scores too low)
+                    decisions = [d for d in decisions if (getattr(d, "score", None) or 0) >= TIER3_THRESHOLDS["decision"]]
                 if decisions:
                     # 007.2: Diversity filter — use category as topic key
                     decisions = self._enforce_diversity(decisions, "category", max_per_subject=3)
@@ -243,8 +256,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(dec_text),
                         )
                     )
-            except Exception:
-                logger.warning("Brain.query failed during context build")
+            except Exception as e:
+                logger.warning("Brain.query failed during context build: %s", e)
 
         # 6. Facts (F10: retrieve -> apply_frame_boost -> dedup -> usage_boost -> truncate)
         if budget.facts > 0 and "fact" not in skip_types:
@@ -256,9 +269,9 @@ class ContextEngine:
                     q_text, limit=limit, session=session,
                     exclude_categories=TIER1_FACT_CATEGORIES,
                 )
-                if facts:
-                    # Tier 3: min_score threshold
-                    facts = [f for f in facts if (getattr(f, "score", None) or 0) >= 0.25]
+                if facts and self._has_embeddings:
+                    # Tier 3: min_score threshold (only with embeddings)
+                    facts = [f for f in facts if (getattr(f, "score", None) or 0) >= TIER3_THRESHOLDS["fact"]]
                 if facts:
                     # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
@@ -291,8 +304,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(facts_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_facts failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_facts failed during context build: %s", e)
 
         # 7. Procedures
         if budget.procedures > 0 and "procedure" not in skip_types:
@@ -300,9 +313,9 @@ class ContextEngine:
                 limit = _limits.get("procedure", 5)
                 q_text = _query_texts.get("procedure", _default_query)
                 procedures = await self._heart.search_procedures(q_text, limit=limit, session=session)
-                if procedures:
-                    # Tier 3: min_score threshold
-                    procedures = [p for p in procedures if (getattr(p, "score", None) or 0) >= 0.3]
+                if procedures and self._has_embeddings:
+                    # Tier 3: min_score threshold (only with embeddings)
+                    procedures = [p for p in procedures if (getattr(p, "score", None) or 0) >= TIER3_THRESHOLDS["procedure"]]
                 if procedures:
                     # F10: apply_frame_boost
                     procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
@@ -328,8 +341,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(proc_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_procedures failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_procedures failed during context build: %s", e)
 
         # 8. Episodes
         if budget.episodes > 0 and "episode" not in skip_types:
@@ -337,9 +350,9 @@ class ContextEngine:
                 limit = _limits.get("episode", 5)
                 q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
-                if episodes:
-                    # Tier 3: min_score threshold
-                    episodes = [e for e in episodes if (getattr(e, "score", None) or 0) >= 0.3]
+                if episodes and self._has_embeddings:
+                    # Tier 3: min_score threshold (only with embeddings)
+                    episodes = [e for e in episodes if (getattr(e, "score", None) or 0) >= TIER3_THRESHOLDS["episode"]]
                 if episodes:
                     # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
@@ -368,8 +381,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(ep_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_episodes failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_episodes failed during context build: %s", e)
 
         # Assemble system prompt with markdown headers
         parts: list[str] = []
