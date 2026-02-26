@@ -170,6 +170,7 @@ async def create_components(settings: Settings) -> dict:
         "bus": bus,
         "session_monitor": session_monitor,
         "handler_http": handler_http,
+        "identity_manager": identity_manager,
     }
 
 
@@ -260,6 +261,7 @@ def build_app(settings: Settings) -> Starlette:
         database=_lazy_component(components, "database"),
         settings=settings,
         lifespan=lifespan,
+        identity_manager=_lazy_component(components, "identity_manager"),
     )
 
     if settings.mcp_enabled:
