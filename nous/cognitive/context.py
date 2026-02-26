@@ -256,8 +256,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(dec_text),
                         )
                     )
-            except Exception:
-                logger.warning("Brain.query failed during context build")
+            except Exception as e:
+                logger.warning("Brain.query failed during context build: %s", e)
 
         # 6. Facts (F10: retrieve -> apply_frame_boost -> dedup -> usage_boost -> truncate)
         if budget.facts > 0 and "fact" not in skip_types:
@@ -304,8 +304,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(facts_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_facts failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_facts failed during context build: %s", e)
 
         # 7. Procedures
         if budget.procedures > 0 and "procedure" not in skip_types:
@@ -341,8 +341,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(proc_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_procedures failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_procedures failed during context build: %s", e)
 
         # 8. Episodes
         if budget.episodes > 0 and "episode" not in skip_types:
@@ -381,8 +381,8 @@ class ContextEngine:
                             token_estimate=self._estimate_tokens(ep_text),
                         )
                     )
-            except Exception:
-                logger.warning("Heart.search_episodes failed during context build")
+            except Exception as e:
+                logger.warning("Heart.search_episodes failed during context build: %s", e)
 
         # Assemble system prompt with markdown headers
         parts: list[str] = []
