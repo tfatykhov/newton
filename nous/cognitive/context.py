@@ -303,6 +303,7 @@ class ContextEngine:
                             recalled_ids["fact"].append(mid)
                             recalled_content_map[mid] = getattr(f, "content", "")
 
+                    logger.info("Tier3 facts after pipeline: %d remaining", len(facts))
                     facts_text = self._format_facts(facts)
                     facts_text = self._truncate_to_budget(facts_text, budget.facts)
                     sections.append(
