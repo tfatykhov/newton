@@ -242,10 +242,21 @@ class Heart:
         limit: int = 10,
         category: str | None = None,
         active_only: bool = True,
+        exclude_categories: list[str] | None = None,
         session: AsyncSession | None = None,
     ) -> list[FactSummary]:
         """Hybrid search over facts."""
-        return await self.facts.search(query, limit, category, active_only, session)
+        return await self.facts.search(query, limit, category, active_only, exclude_categories, session)
+
+    async def list_facts_by_category(
+        self,
+        categories: list[str],
+        active_only: bool = True,
+        limit: int = 20,
+        session: AsyncSession | None = None,
+    ) -> list[FactSummary]:
+        """Load facts by category without semantic search (Tier 1)."""
+        return await self.facts.list_by_category(categories, active_only, limit, session)
 
     async def get_current_fact(self, fact_id: UUID, session: AsyncSession | None = None) -> FactDetail:
         """Follow superseded_by chain to find current version."""

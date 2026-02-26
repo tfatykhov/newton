@@ -515,6 +515,58 @@ class FactManager:
         return self._to_detail(fact)
 
     # ------------------------------------------------------------------
+    # list_by_category() — Tier 1 always-on facts
+    # ------------------------------------------------------------------
+
+    async def list_by_category(
+        self,
+        categories: list[str],
+        active_only: bool = True,
+        limit: int = 20,
+        session: AsyncSession | None = None,
+    ) -> list[FactSummary]:
+        """Load facts by category without semantic search.
+
+        Used for Tier 1 always-on context (preference, person, rule facts).
+        """
+        if session is None:
+            async with self.db.session() as session:
+                return await self._list_by_category(categories, active_only, limit, session)
+        return await self._list_by_category(categories, active_only, limit, session)
+
+    async def _list_by_category(
+        self,
+        categories: list[str],
+        active_only: bool,
+        limit: int,
+        session: AsyncSession,
+    ) -> list[FactSummary]:
+        stmt = (
+            select(Fact)
+            .where(
+                Fact.agent_id == self.agent_id,
+                Fact.category.in_(categories),
+            )
+        )
+        if active_only:
+            stmt = stmt.where(Fact.active == True)  # noqa: E712
+        stmt = stmt.order_by(Fact.confidence.desc()).limit(limit)
+        result = await session.execute(stmt)
+        facts = result.scalars().all()
+        return [
+            FactSummary(
+                id=f.id,
+                content=f.content,
+                category=f.category,
+                subject=f.subject,
+                confidence=f.confidence or 1.0,
+                active=f.active if f.active is not None else True,
+                score=1.0,  # Tier 1: always-on, no relevance ranking
+            )
+            for f in facts
+        ]
+
+    # ------------------------------------------------------------------
     # search()
     # ------------------------------------------------------------------
 
@@ -524,13 +576,14 @@ class FactManager:
         limit: int = 10,
         category: str | None = None,
         active_only: bool = True,
+        exclude_categories: list[str] | None = None,
         session: AsyncSession | None = None,
     ) -> list[FactSummary]:
         """Hybrid search over facts."""
         if session is None:
             async with self.db.session() as session:
-                return await self._search(query, limit, category, active_only, session)
-        return await self._search(query, limit, category, active_only, session)
+                return await self._search(query, limit, category, active_only, exclude_categories, session)
+        return await self._search(query, limit, category, active_only, exclude_categories, session)
 
     async def _search(
         self,
@@ -538,6 +591,7 @@ class FactManager:
         limit: int,
         category: str | None,
         active_only: bool,
+        exclude_categories: list[str] | None,
         session: AsyncSession,
     ) -> list[FactSummary]:
         # Generate query embedding
@@ -553,6 +607,12 @@ class FactManager:
         if category:
             extra_where += " AND t.category = :category"
             extra_params["category"] = category
+        if exclude_categories:
+            # Tier 3: exclude Tier 1 categories from semantic search
+            placeholders = ", ".join(f":exc_{i}" for i in range(len(exclude_categories)))
+            extra_where += f" AND (t.category IS NULL OR t.category NOT IN ({placeholders}))"
+            for i, cat in enumerate(exclude_categories):
+                extra_params[f"exc_{i}"] = cat
 
         # Note: hybrid_search always applies active=true filter.
         # For active_only=False, we need a different approach.
