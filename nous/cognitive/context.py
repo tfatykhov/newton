@@ -156,30 +156,41 @@ class ContextEngine:
             )
 
         # 4. Working memory (P1-7: no agent_id param)
-        if budget.working_memory > 0:
-            try:
-                wm = await self._heart.get_working_memory(session_id, session=session)
-                if wm is not None:
-                    wm_text = self._format_working_memory(wm)
-                    wm_text = self._truncate_to_budget(wm_text, budget.working_memory)
-                    sections.append(
-                        ContextSection(
-                            priority=4,
-                            label="Working Memory",
-                            content=wm_text,
-                            token_estimate=self._estimate_tokens(wm_text),
-                        )
-                    )
-            except Exception:
-                logger.warning("Failed to load working memory during context build")
+        # Hoisted: fetch wm early so current_topic is available for query enhancement (007.2)
+        wm = None
+        current_topic: str | None = None
+        try:
+            wm = await self._heart.get_working_memory(session_id, session=session)
+        except Exception:
+            logger.warning("Failed to load working memory during context build")
+
+        if wm is not None:
+            current_topic = getattr(wm, "current_task", None)
+
+        if budget.working_memory > 0 and wm is not None:
+            wm_text = self._format_working_memory(wm)
+            wm_text = self._truncate_to_budget(wm_text, budget.working_memory)
+            sections.append(
+                ContextSection(
+                    priority=4,
+                    label="Working Memory",
+                    content=wm_text,
+                    token_estimate=self._estimate_tokens(wm_text),
+                )
+            )
+
+        # 007.2: Topic-enhanced default query — prefix with current_topic
+        _default_query = f"{current_topic}: {input_text}" if current_topic else input_text
 
         # 5. Decisions (F26: skip_types is primary skip mechanism)
         if budget.decisions > 0 and "decision" not in skip_types:
             try:
                 limit = _limits.get("decision", 5)
-                q_text = _query_texts.get("decision", input_text)
+                q_text = _query_texts.get("decision", _default_query)
                 decisions = await self._brain.query(q_text, limit=limit, session=session)
                 if decisions:
+                    # 007.2: Diversity filter — use category as topic key
+                    decisions = self._enforce_diversity(decisions, "category", max_per_subject=3)
                     # F1: Collect recalled IDs
                     for d in decisions:
                         mid = str(getattr(d, "id", ""))
@@ -208,11 +219,14 @@ class ContextEngine:
         if budget.facts > 0 and "fact" not in skip_types:
             try:
                 limit = _limits.get("fact", 5)
-                q_text = _query_texts.get("fact", input_text)
+                q_text = _query_texts.get("fact", _default_query)
                 facts = await self._heart.search_facts(q_text, limit=limit, session=session)
                 if facts:
                     # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
+
+                    # 007.2: Diversity filter — use subject as topic key
+                    facts = self._enforce_diversity(facts, "subject", max_per_subject=2)
 
                     # Dedup against conversation
                     facts = await self._apply_dedup(facts, _conv_msgs, "content")
@@ -246,7 +260,7 @@ class ContextEngine:
         if budget.procedures > 0 and "procedure" not in skip_types:
             try:
                 limit = _limits.get("procedure", 5)
-                q_text = _query_texts.get("procedure", input_text)
+                q_text = _query_texts.get("procedure", _default_query)
                 procedures = await self._heart.search_procedures(q_text, limit=limit, session=session)
                 if procedures:
                     # F10: apply_frame_boost
@@ -280,11 +294,14 @@ class ContextEngine:
         if budget.episodes > 0 and "episode" not in skip_types:
             try:
                 limit = _limits.get("episode", 5)
-                q_text = _query_texts.get("episode", input_text)
+                q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
                 if episodes:
                     # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
+
+                    # 007.2: Diversity filter — use first tag as topic key
+                    episodes = self._enforce_diversity(episodes, "tags", max_per_subject=2)
 
                     # Dedup + usage boost
                     episodes = await self._apply_dedup(episodes, _conv_msgs, "summary")
@@ -368,6 +385,34 @@ class ContextEngine:
 
         boosted.sort(key=lambda x: x[1], reverse=True)
         return [item for item, _ in boosted]
+
+    def _enforce_diversity(self, items: list, topic_attr: str, max_per_subject: int = 2) -> list:
+        """Prevent one topic from dominating recall results (007.2).
+
+        Extracts a topic key from each item using topic_attr:
+        - String attrs (e.g. 'subject', 'category'): first word, lowercased
+        - List attrs (e.g. 'tags'): first element, lowercased
+        Items without the attr default to 'unknown'.
+        """
+        if not items:
+            return items
+
+        seen: dict[str, int] = {}
+        result = []
+        for item in items:
+            raw = getattr(item, topic_attr, None)
+            if isinstance(raw, list):
+                topic_key = raw[0].lower() if raw else "unknown"
+            elif isinstance(raw, str) and raw:
+                topic_key = raw.split()[0].lower()
+            else:
+                topic_key = "unknown"
+
+            count = seen.get(topic_key, 0)
+            if count < max_per_subject:
+                result.append(item)
+                seen[topic_key] = count + 1
+        return result
 
     def _estimate_tokens(self, text: str) -> int:
         """Rough token count: len(text) / CHARS_PER_TOKEN."""

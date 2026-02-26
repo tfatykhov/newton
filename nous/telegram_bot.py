@@ -454,8 +454,9 @@ class NousTelegramBot:
             await self._chat(chat_id, "Show me your current status and available tools.", debug=True)
             return
 
-        # Forward to Nous (streaming)
-        await self._chat_streaming(chat_id, text)
+        # Forward to Nous (streaming) — 007.4: pass user identity
+        user_display_name = message.get("from", {}).get("first_name")
+        await self._chat_streaming(chat_id, text, user_id=str(user_id) if user_id else None, user_display_name=user_display_name)
 
     async def _chat(self, chat_id: int, text: str, debug: bool = False) -> None:
         """Send message to Nous API and relay response to Telegram."""
@@ -542,7 +543,10 @@ class NousTelegramBot:
             logger.error("Chat error: %s", e)
             await self._send(chat_id, f"❌ Error: {e}")
 
-    async def _chat_streaming(self, chat_id: int, text: str) -> None:
+    async def _chat_streaming(
+        self, chat_id: int, text: str,
+        user_id: str | None = None, user_display_name: str | None = None,
+    ) -> None:
         """Send message to Nous streaming API and progressively edit Telegram message."""
         from uuid import uuid4
 
@@ -551,6 +555,11 @@ class NousTelegramBot:
         # P1 fix: generate session_id upfront so client and server use same ID
         session_id = self._sessions.setdefault(chat_id, str(uuid4()))
         payload: dict[str, Any] = {"message": text, "session_id": session_id, "platform": "telegram"}
+        # 007.4: Pass user identity for episode tracking
+        if user_id:
+            payload["user_id"] = user_id
+        if user_display_name:
+            payload["user_display_name"] = user_display_name
 
         streamer = StreamingMessage(self, chat_id)
 

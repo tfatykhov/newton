@@ -13,7 +13,9 @@ import logging
 import re
 from uuid import UUID
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
 from nous.brain.brain import Brain
 from nous.cognitive.context import ContextEngine
@@ -28,6 +30,7 @@ from nous.config import Settings
 from nous.events import Event, EventBus
 from nous.heart.heart import Heart
 from nous.heart.schemas import EpisodeInput, FactInput
+from nous.storage.models import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +145,16 @@ class CognitiveLayer:
 
         # 006: Transcript capture
         meta.transcript.append(f"User: {user_input[:500]}")
+
+        # 007.4: Update agents.last_active timestamp
+        try:
+            async with self._brain.db.session() as _session:
+                await _session.execute(
+                    sa_update(Agent).where(Agent.id == agent_id).values(last_active=func.now())
+                )
+                await _session.commit()
+        except Exception:
+            logger.debug("Failed to update last_active for agent %s", agent_id)
 
         # 2. FRAME — select cognitive frame (F5: agent_id first)
         try:
@@ -384,29 +397,75 @@ class CognitiveLayer:
         return assessment
 
     # ------------------------------------------------------------------
-    # Informational detection (006.2)
+    # Informational detection (006.2, expanded 007.3)
     # ------------------------------------------------------------------
 
-    def _is_informational(self, turn_result: TurnResult) -> bool:
-        """Detect responses that are information, not decisions (006.2).
+    # 007.3: Expanded keyword patterns for informational detection
+    _INFO_PATTERNS = [
+        # Status & inventory
+        "current status", "available tools", "here's what",
+        "here is what", "here are the", "summary of",
+        # Memory recall
+        "i remember", "my memory", "what i know",
+        "i recall", "from memory", "i found",
+        # Git / repo status
+        "repo pulled", "repo is at", "git pull",
+        "latest commit", "new branch", "new pr",
+        "commits since", "merged to main",
+        # Acknowledgment / confirmation
+        "got it", "understood", "noted", "will do",
+        "sure thing", "okay,", "alright,",
+        # Simple answers
+        "the answer is", "it means", "this is because",
+        "that's correct", "you're right",
+        # Lists / enumerations
+        "here's a list", "the following",
+    ]
 
-        Returns True when the response is a status dump or memory recall
-        that should NOT be recorded as a decision. Checks:
+    # 007.3: Emoji header pattern — status dump indicator
+    _EMOJI_HEADER_RE = re.compile(r"^[\U0001f300-\U0001f9ff\u2600-\u27bf]\s")
+
+    def _is_informational(self, turn_result: TurnResult) -> bool:
+        """Detect responses that are information, not decisions (006.2, 007.3).
+
+        Returns True when the response is a status dump, memory recall,
+        acknowledgment, or list that should NOT be recorded as a decision.
+
+        Checks (in order):
         1. If record_decision tool was called -> always a real decision
-        2. Conservative keyword patterns for status/memory responses
+        2. Keyword patterns (expanded 007.3)
+        3. Structural: emoji header (status dump pattern)
+        4. Structural: very short response (< 50 chars) without tools
+        5. Structural: list-dominated response (> 60% bullet lines)
         """
         # If agent explicitly recorded a decision, it's real
         tools_used = {r.tool_name for r in turn_result.tool_results}
         if "record_decision" in tools_used:
             return False
 
-        # Conservative: only match clear informational patterns
-        response_lower = turn_result.response_text[:500].lower()
-        info_patterns = [
-            "current status", "available tools",
-            "i remember", "my memory", "what i know",
-        ]
-        return any(p in response_lower for p in info_patterns)
+        response = turn_result.response_text
+        response_lower = response[:500].lower()
+
+        # 1. Keyword patterns
+        if any(p in response_lower for p in self._INFO_PATTERNS):
+            return True
+
+        # 2. Emoji header (status dump pattern)
+        if self._EMOJI_HEADER_RE.match(response[:10]):
+            return True
+
+        # 3. Very short response without tools = likely acknowledgment
+        if len(response.strip()) < 50 and not tools_used:
+            return True
+
+        # 4. List-dominated response (> 60% lines start with bullets)
+        lines = [line.strip() for line in response.split("\n") if line.strip()]
+        if len(lines) > 3:
+            list_lines = sum(1 for line in lines if line[:1] in ("-", "*", "\u2022"))
+            if list_lines / len(lines) > 0.6:
+                return True
+
+        return False
 
     # ------------------------------------------------------------------
     # Episode significance & dedup (005.5)

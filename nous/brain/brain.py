@@ -948,26 +948,29 @@ class Brain:
         event_type: str,
         data: dict,
         session: AsyncSession | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Log a cognitive event to nous_system.events."""
         if session is None:
             async with self.db.session() as session:
-                await self._emit_event(session, event_type, data)
+                await self._emit_event(session, event_type, data, session_id=session_id)
                 await session.commit()
         else:
-            await self._emit_event(session, event_type, data)
+            await self._emit_event(session, event_type, data, session_id=session_id)
 
     async def _emit_event(
         self,
         session: AsyncSession,
         event_type: str,
         data: dict,
+        session_id: str | None = None,
     ) -> None:
-        """Internal emit_event — inserts in same session (P2-9)."""
+        """Internal emit_event — inserts in same session (P2-9, 007.4)."""
         event = Event(
             agent_id=self.agent_id,
             event_type=event_type,
             data=data,
+            session_id=session_id,
         )
         session.add(event)
 

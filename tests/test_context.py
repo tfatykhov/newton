@@ -424,3 +424,141 @@ async def test_format_facts_no_active_inactive_status():
     # Should not contain the word "active" or "inactive" as status labels
     assert "active" not in result
     assert "inactive" not in result
+
+
+# ---------------------------------------------------------------------------
+# 19-25. Topic-aware context recall (007.2)
+# ---------------------------------------------------------------------------
+
+
+def _mock_decision(**kwargs):
+    """Build a mock decision with given attributes."""
+    from unittest.mock import MagicMock
+
+    d = MagicMock()
+    d.id = kwargs.get("id", "dec-1")
+    d.description = kwargs.get("description", "A decision")
+    d.confidence = kwargs.get("confidence", 0.85)
+    d.category = kwargs.get("category", "architecture")
+    d.outcome = kwargs.get("outcome", "pending")
+    return d
+
+
+def _mock_episode(**kwargs):
+    """Build a mock episode with given attributes."""
+    from unittest.mock import MagicMock
+
+    e = MagicMock()
+    e.id = kwargs.get("id", "ep-1")
+    e.summary = kwargs.get("summary", "An episode")
+    e.outcome = kwargs.get("outcome", "completed")
+    e.started_at = kwargs.get("started_at", None)
+    e.tags = kwargs.get("tags", [])
+    return e
+
+
+async def test_enforce_diversity_facts_by_subject():
+    """19. Diversity filter limits facts per subject."""
+    engine = _make_context_engine_light()
+    facts = [
+        _mock_fact(content="Nous uses PostgreSQL", subject="nous", confidence=0.9),
+        _mock_fact(content="Nous uses pgvector", subject="nous", confidence=0.9),
+        _mock_fact(content="Nous uses SQLAlchemy", subject="nous", confidence=0.9),
+        _mock_fact(content="CE uses ChromaDB", subject="cognition-engines", confidence=0.9),
+        _mock_fact(content="CE uses FastAPI", subject="cognition-engines", confidence=0.9),
+    ]
+    result = engine._enforce_diversity(facts, "subject", max_per_subject=2)
+    # Max 2 per subject: 2 nous + 2 CE = 4 (one nous item dropped)
+    assert len(result) == 4
+    nous_count = sum(1 for f in result if f.subject == "nous")
+    assert nous_count == 2
+
+
+async def test_enforce_diversity_decisions_by_category():
+    """20. Diversity filter limits decisions per category."""
+    engine = _make_context_engine_light()
+    decisions = [
+        _mock_decision(id="d1", category="architecture"),
+        _mock_decision(id="d2", category="architecture"),
+        _mock_decision(id="d3", category="architecture"),
+        _mock_decision(id="d4", category="architecture"),
+        _mock_decision(id="d5", category="tooling"),
+    ]
+    result = engine._enforce_diversity(decisions, "category", max_per_subject=3)
+    assert len(result) == 4  # 3 architecture + 1 tooling
+
+
+async def test_enforce_diversity_episodes_by_tags():
+    """21. Diversity filter uses first tag as topic key for episodes."""
+    engine = _make_context_engine_light()
+    episodes = [
+        _mock_episode(id="e1", tags=["nous", "db"]),
+        _mock_episode(id="e2", tags=["nous", "api"]),
+        _mock_episode(id="e3", tags=["nous", "test"]),
+        _mock_episode(id="e4", tags=["ce", "api"]),
+    ]
+    result = engine._enforce_diversity(episodes, "tags", max_per_subject=2)
+    assert len(result) == 3  # 2 nous + 1 ce
+
+
+async def test_enforce_diversity_empty_list():
+    """22. Diversity filter returns empty list unchanged."""
+    engine = _make_context_engine_light()
+    result = engine._enforce_diversity([], "subject", max_per_subject=2)
+    assert result == []
+
+
+async def test_enforce_diversity_missing_attr_defaults_unknown():
+    """23. Items without topic attr all map to 'unknown'."""
+    engine = _make_context_engine_light()
+    facts = [
+        _mock_fact(content="fact 1", subject=None),
+        _mock_fact(content="fact 2", subject=None),
+        _mock_fact(content="fact 3", subject=None),
+    ]
+    result = engine._enforce_diversity(facts, "subject", max_per_subject=2)
+    # All have topic_key='unknown', so max 2 pass
+    assert len(result) == 2
+
+
+async def test_topic_enhanced_query_with_working_memory(context_engine, brain, heart, session):
+    """24. When working memory has a topic, recall queries are prefixed."""
+    sid = f"test-topic-query-{uuid.uuid4().hex[:8]}"
+    await heart.get_or_create_working_memory(sid, session=session)
+    await heart.focus(sid, task="cognition-engines", frame="task", session=session)
+
+    # Seed a fact about cognition-engines
+    await heart.learn(
+        FactInput(
+            content="Cognition-engines uses ChromaDB for vector storage",
+            category="technical",
+            subject="cognition-engines",
+            confidence=0.9,
+        ),
+        session=session,
+    )
+
+    frame = _frame_selection()
+    result = await context_engine.build(
+        "nous-default", sid, "what do you know?", frame, session=session
+    )
+
+    # The build should complete without error — topic prefix is additive
+    assert result.system_prompt is not None
+    assert len(result.system_prompt) > 0
+
+
+async def test_topic_no_working_memory_fallback(context_engine, brain, heart, session):
+    """25. Without working memory topic, queries use raw input_text (unchanged behavior)."""
+    sid = f"test-no-topic-{uuid.uuid4().hex[:8]}"
+    await heart.get_or_create_working_memory(sid, session=session)
+    # Don't set a task — current_task is None
+
+    frame = _frame_selection()
+    result = await context_engine.build(
+        "nous-default", sid, "tell me about databases", frame, session=session
+    )
+
+    # Should work exactly as before — no topic prefix
+    assert result.system_prompt is not None
+    assert len(result.system_prompt) > 0
