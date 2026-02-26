@@ -50,24 +50,47 @@ All shipped implementation specs with PR references:
 | 007.2 | Topic-Aware Recall | ✅ Shipped | #55 |
 | 007.3 | Improve _is_informational() | ✅ Shipped | #55 |
 | 007.4 | Fix Unpopulated Columns | ✅ Shipped | #55 |
-| 007.5 | Recall Min Threshold | ✅ Shipped | #59 |
+| 007.5 | Recall Min Threshold | ⏸ Reverted | #59 — needs F018 (tiered context) first |
 
-### v0.2.0 Preview (Future)
+### Phase 1 — Foundation (next to build)
+
+| Feature | Name | Priority | Description |
+|---------|------|----------|-------------|
+| F018 | [Agent Identity](F018-agent-identity.md) | **P0** | DB-backed identity layer — user prefs, agent character, boundaries. Enables tiered context. |
+| 007.5 | Tiered Context Model | **P0** | Redesign: Tier 1 (always-on from F018), Tier 2 (session), Tier 3 (search + threshold). Depends on F018. |
+| #57 | Recall Min Threshold | **P0** | Re-apply min_score filtering to Tier 3 only (safe once identity facts are in Tier 1). |
+
+### Phase 2 — Quality
+
+| Feature | Name | Priority | Description |
+|---------|------|----------|-------------|
+| #38 | _is_informational() Phase 2 | P1 | Decision-language detection + frame heuristic. Needs real-world data to tune. |
+| #52 | Topic-Aware Recall v2 | P1 | Frame-topic alignment check (skipped from 007.2). |
+| F011 | [Skill Discovery](F011-skill-discovery.md) | P1 | Index workspace skills as procedures, auto-surface in RECALL based on task/frame. |
+
+### Phase 3 — Growth
+
+| Feature | Name | Priority | Description |
+|---------|------|----------|-------------|
+| F007 | Metrics & Growth | P2 | Calibration, Brier scores, outcome tracking. Needs clean decisions from Phase 2. |
+| F008 | Memory Lifecycle | P2 | Decay, pruning, sleep phases 2/3/5. Needs identity layer to know what's permanent. |
+| F012 | K-Line Learning | P2 | Auto-create procedures from repeated patterns. |
+
+### Future
+
 | Feature | Name | Description |
 |---------|------|-------------|
-| F011 | [Skill Discovery](F011-skill-discovery.md) | Index workspace skills as procedures, auto-surface in RECALL stage based on task/frame |
-| F012 | K-Line Learning | Auto-create/refine procedures from repeated patterns |
 | F013 | Frame Splitting | Parallel cognitive frames via sub-agents |
 | F014 | Model Router | LLM portability via proxy layer |
 | F015 | Growth Engine | Administrative self-improvement (Papert's Principle) |
 | F016 | Multi-Agent | Nous agents sharing knowledge |
 | F017 | Dashboard | Visual growth tracking and cognitive state |
-| F018 | [Agent Identity](F018-agent-identity.md) | DB-backed identity layer — character, values, protocols that evolve over time |
+| F019 | [Nous Website](F019-nous-website.md) | Developer-first open-source framework site |
 
 ## Stats
 
-- **Total source:** ~11,800 lines of Python
-- **Test count:** 424 tests across 33 test files
+- **Total source:** ~13,800 lines of Python
+- **Test count:** 638 tests across 38 test files
 - **Database:** 18 tables across 3 schemas (brain, heart, system)
 - **Tools:** 8 agent tools (record_decision, recall_deep, learn_fact, create_censor, bash, read_file, write_file, web_search, web_fetch)
 - **Endpoints:** 12 REST endpoints + MCP server + Telegram bot
