@@ -77,7 +77,24 @@ async def create_components(settings: Settings) -> dict:
         bus.set_db_persister(persist_to_db)
 
     # P0-2/P0-3 fix: preserve identity_prompt, pass bus as keyword arg
-    cognitive = CognitiveLayer(brain, heart, settings, settings.identity_prompt, bus=bus)
+    # 008: Initialize IdentityManager
+    from nous.identity.manager import IdentityManager
+    identity_manager = IdentityManager(database, settings.agent_id)
+
+    # 008: Auto-seed from existing facts on upgrade (review fix P2-2)
+    try:
+        async with database.session() as _seed_session:
+            seeded = await identity_manager.auto_seed_from_facts(heart, _seed_session)
+            if seeded:
+                await _seed_session.commit()
+                logger.info("Auto-seeded identity from existing facts")
+    except Exception:
+        logger.warning("Identity auto-seed check failed (non-fatal)")
+
+    cognitive = CognitiveLayer(
+        brain, heart, settings, settings.identity_prompt,
+        bus=bus, identity_manager=identity_manager,
+    )
 
     # 006: Register handlers on bus (after cognitive exists for monitor)
     if bus is not None:
@@ -132,6 +149,10 @@ async def create_components(settings: Settings) -> dict:
         limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
     )
     register_web_tools(dispatcher, settings, web_http)
+
+    # 008: Register identity tools (gated by "initiation" frame)
+    from nous.identity.tools import register_identity_tools
+    register_identity_tools(dispatcher, identity_manager)
 
     runner = AgentRunner(cognitive, brain, heart, settings)
     runner.set_dispatcher(dispatcher)

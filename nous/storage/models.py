@@ -40,12 +40,28 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(Text)
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
+    is_initiated: Mapped[bool | None] = mapped_column(Boolean, server_default="false")
     last_active: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
 
     # Relationships
     frames: Mapped[list["Frame"]] = relationship(back_populates="agent")
+
+
+class AgentIdentity(Base):
+    __tablename__ = "agent_identity"
+    __table_args__ = {"schema": "nous_system"}
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    agent_id: Mapped[str] = mapped_column(String(100), ForeignKey("nous_system.agents.id"), nullable=False)
+    section: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_by: Mapped[str | None] = mapped_column(String(50))
+    previous_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("nous_system.agent_identity.id"))
 
 
 class Frame(Base):

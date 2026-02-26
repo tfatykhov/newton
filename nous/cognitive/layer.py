@@ -70,11 +70,14 @@ class CognitiveLayer:
         identity_prompt: str = "",
         *,
         bus: EventBus | None = None,
+        identity_manager: "IdentityManager | None" = None,
     ) -> None:
         self._brain = brain
         self._heart = heart
         self._settings = settings
         self._bus = bus
+        self._identity_manager = identity_manager
+        self._identity_prompt_fallback = identity_prompt
         # P1-1: Use brain.db (public), not brain._db
         self._frames = FrameEngine(brain.db, settings)
         # F3: Instantiate IntentClassifier and UsageTracker
@@ -156,44 +159,85 @@ class CognitiveLayer:
         except Exception:
             logger.debug("Failed to update last_active for agent %s", agent_id)
 
+        # 008: Check initiation state before frame selection
+        _is_initiation = False
+        if self._identity_manager is not None:
+            try:
+                _is_initiated = await self._identity_manager.is_initiated(session=session)
+                if not _is_initiated:
+                    _is_initiation = True
+                    logger.info("Agent %s not initiated — entering initiation protocol", agent_id)
+            except Exception:
+                logger.warning("Failed to check initiation state, proceeding normally")
+
         # 2. FRAME — select cognitive frame (F5: agent_id first)
-        try:
-            frame = await self._frames.select(agent_id, user_input, session=session)
-        except Exception:
-            logger.warning("Frame selection failed, falling back to conversation")
-            frame = self._frames._default_selection()
+        if _is_initiation:
+            # 008: Force initiation frame — restricts tools to store_identity + complete_initiation
+            from nous.cognitive.schemas import FrameSelection
+            frame = FrameSelection(
+                frame_id="initiation",
+                frame_name="Initiation",
+                confidence=1.0,
+                description="Identity initiation protocol",
+                questions_to_ask=[],
+            )
+        else:
+            try:
+                frame = await self._frames.select(agent_id, user_input, session=session)
+            except Exception:
+                logger.warning("Frame selection failed, falling back to conversation")
+                frame = self._frames._default_selection()
 
         # 2b. CLASSIFY — extract intent signals and plan retrieval (005.1)
         signals = self._intent_classifier.classify(user_input, frame)
         plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
-        # 3. RECALL — build context with intent-driven plan
+        # 3. RECALL — build context (or initiation prompt)
         system_prompt = ""
+        if _is_initiation:
+            # 008: Use initiation prompt instead of normal context
+            from nous.identity.protocol import INITIATION_PROMPT
+            system_prompt = INITIATION_PROMPT
         recalled_decision_ids: list[str] = []
         recalled_fact_ids: list[str] = []
         recalled_procedure_ids: list[str] = []
         recalled_episode_ids: list[str] = []
         recalled_content_map: dict[str, str] = {}
         context_token_estimate = 0
+        if not _is_initiation:
+            # 008: Load identity from DB for normal turns (review fix P1-3)
+            _identity_override = None
+            if self._identity_manager is not None:
+                try:
+                    identity_sections = await self._identity_manager.get_current(session=session)
+                    if identity_sections:
+                        _identity_override = self._identity_manager.assemble_prompt(identity_sections)
+                except Exception:
+                    logger.warning("Failed to load identity from DB, using fallback")
+        if _is_initiation:
+            # Skip normal context build — initiation prompt already set
+            context_token_estimate = len(system_prompt) // 4
         try:
-            build_result = await self._context.build(
-                agent_id,
-                session_id,
-                user_input,
-                frame,
-                session=session,
-                conversation_messages=conversation_messages,
-                retrieval_plan=plan,
-                usage_tracker=self._usage_tracker,
-            )
-            system_prompt = build_result.system_prompt
-            context_token_estimate = sum(s.token_estimate for s in build_result.sections)
-            # F1: Extract recalled IDs from BuildResult
-            recalled_decision_ids = build_result.recalled_ids.get("decision", [])
-            recalled_fact_ids = build_result.recalled_ids.get("fact", [])
-            recalled_procedure_ids = build_result.recalled_ids.get("procedure", [])
-            recalled_episode_ids = build_result.recalled_ids.get("episode", [])
-            recalled_content_map = build_result.recalled_content_map
+            if not _is_initiation:
+                build_result = await self._context.build(
+                    agent_id,
+                    session_id,
+                    user_input,
+                    frame,
+                    session=session,
+                    conversation_messages=conversation_messages,
+                    retrieval_plan=plan,
+                    usage_tracker=self._usage_tracker,
+                    identity_override=_identity_override,
+                )
+                system_prompt = build_result.system_prompt
+                context_token_estimate = sum(s.token_estimate for s in build_result.sections)
+                # F1: Extract recalled IDs from BuildResult
+                recalled_decision_ids = build_result.recalled_ids.get("decision", [])
+                recalled_fact_ids = build_result.recalled_ids.get("fact", [])
+                recalled_procedure_ids = build_result.recalled_ids.get("procedure", [])
+                recalled_episode_ids = build_result.recalled_ids.get("episode", [])
+                recalled_content_map = build_result.recalled_content_map
         except Exception:
             logger.warning("Context build failed, using identity prompt only")
             system_prompt = self._context._identity_prompt or ""
