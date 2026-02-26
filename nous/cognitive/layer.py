@@ -165,8 +165,14 @@ class CognitiveLayer:
             try:
                 _is_initiated = await self._identity_manager.is_initiated(session=session)
                 if not _is_initiated:
-                    _is_initiation = True
-                    logger.info("Agent %s not initiated — entering initiation protocol", agent_id)
+                    # P2-1: Atomically claim initiation to prevent race with concurrent sessions
+                    claimed = await self._identity_manager.claim_initiation(session)
+                    if claimed:
+                        _is_initiation = True
+                        logger.info("Agent %s not initiated — claimed initiation protocol", agent_id)
+                    else:
+                        # Another session is already running initiation — proceed normally
+                        logger.info("Agent %s initiation already claimed by another session", agent_id)
             except Exception:
                 logger.warning("Failed to check initiation state, proceeding normally")
 

@@ -62,8 +62,8 @@ CREATE TABLE nous_system.agent_identity (
     previous_version_id UUID REFERENCES nous_system.agent_identity(id)
 );
 
-CREATE INDEX idx_identity_agent_section_current
-    ON nous_system.agent_identity(agent_id, section) WHERE is_current = TRUE;
+CREATE UNIQUE INDEX idx_identity_agent_section_current
+    ON nous_system.agent_identity(agent_id, section) WHERE is_current = TRUE;  -- UNIQUE prevents duplicate current rows
 
 -- ---------------------------------------------------------------------------
 -- nous_system.frames — cognitive frame definitions

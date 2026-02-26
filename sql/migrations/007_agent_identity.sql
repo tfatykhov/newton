@@ -14,7 +14,7 @@ CREATE TABLE nous_system.agent_identity (
     previous_version_id UUID REFERENCES nous_system.agent_identity(id)
 );
 
-CREATE INDEX idx_identity_agent_section_current
+CREATE UNIQUE INDEX idx_identity_agent_section_current
     ON nous_system.agent_identity(agent_id, section) WHERE is_current = TRUE;
 
 -- Initiation state flag on agents table

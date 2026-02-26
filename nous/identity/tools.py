@@ -54,6 +54,17 @@ def register_identity_tools(dispatcher: ToolDispatcher, identity_manager: Identi
     async def complete_initiation() -> dict[str, Any]:
         """Mark initiation as complete."""
         try:
+            # P2-4: Validate that at least character + user_profile exist
+            identity = await identity_manager.get_identity()
+            stored = set(identity.keys())
+            required = {"character", "user_profile"}
+            missing = required - stored
+            if missing:
+                return _mcp_response(
+                    f"Cannot complete initiation — missing required sections: "
+                    f"{', '.join(sorted(missing))}. "
+                    f"Please store them first with store_identity."
+                )
             await identity_manager.mark_initiated()
             identity_manager._invalidate_cache()
             logger.info("Initiation protocol completed for agent %s", identity_manager.agent_id)
