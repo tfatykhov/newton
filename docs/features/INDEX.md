@@ -94,51 +94,7 @@ All shipped implementation specs with PR references:
 
 ## Architecture Summary
 
-```
-┌──────────────────────────────────────────────┐
-│              Nous Agent (F004)               │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │      Cognitive Layer (F003)           │    │
-│  │  Frame → Recall → Deliberate →        │    │
-│  │  → Act → Monitor → Learn              │    │
-│  └────────┬─────────────────┬────────────┘    │
-│           │                 │                 │
-│  ┌────────▼──────┐ ┌───────▼─────────┐      │
-│  │  Brain (F001)  │ │  Heart (F002)    │      │
-│  │  Decisions     │ │  Episodes        │      │
-│  │  Deliberation  │ │  Facts           │      │
-│  │  Calibration   │ │  Procedures      │      │
-│  │  Guardrails    │ │  Censors         │      │
-│  │  Graph         │ │  Working Memory  │      │
-│  └────────┬──────┘ └───────┬─────────┘      │
-│           │                 │                 │
-│  ┌────────▼─────────────────▼──────────┐     │
-│  │  Context Engine (F005)               │     │
-│  │  Token budgets, relevance scoring,   │     │
-│  │  intent-driven retrieval             │     │
-│  └──────────────────────────────────────┘     │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │  Event Bus (F006)                     │    │
-│  │  Async handlers, DB persistence       │    │
-│  └──────────────────────────────────────┘    │
-│                                              │
-│  ┌──────────────┐  ┌────────────────────┐    │
-│  │ REST API      │  │ MCP Server         │    │
-│  └──────────────┘  └────────────────────┘    │
-│                                              │
-│  ┌──────────────────────────────────────┐    │
-│  │ Telegram Bot (streaming + usage)      │    │
-│  └──────────────────────────────────────┘    │
-└───────────────────────┬──────────────────────┘
-                        │
-                   ┌────▼─────┐
-                   │ Postgres  │
-                   │ pgvector  │
-                   │ 18 tables │
-                   └──────────┘
-```
+![Nous Architecture](../nous-architecture.png)
 
 ## Database: 18 Tables, 3 Schemas
 
