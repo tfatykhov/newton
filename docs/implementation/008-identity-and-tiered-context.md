@@ -1,10 +1,32 @@
 # 008 — Agent Identity & Tiered Context Model
 
-> **Status:** Planned
+> **Status:** Revised (post 3-agent review)
 > **Priority:** P0
 > **Features:** F018 (Agent Identity) + 007.5 (Tiered Context) + #57 (Recall Threshold)
 > **Depends on:** F002 (Heart), F003 (Cognitive Layer), F005 (Context Engine)
-> **Estimated effort:** ~6-8 hours
+> **Estimated effort:** ~8-10 hours
+
+## 3-Agent Review Findings (2026-02-26)
+
+Reviewed by Correctness (🔬), Architecture (🏗️), and Devil's Advocate (😈). All critical issues addressed below.
+
+### Revisions Applied
+
+| # | Finding | Source | Fix Applied |
+|---|---------|--------|-------------|
+| 1 | FK references `agents.agent_id` (doesn't exist) | 🔬 P1-1 | Changed to `agents.id`, `VARCHAR(100)` |
+| 2 | `@tool` decorator doesn't exist in codebase | 🔬 P1-3 | Use `async def` + `dispatcher.register()` pattern |
+| 3 | Initiation tools unreachable (no frame entry) | 🔬🏗️😈 | Add `"initiation"` to `FRAME_TOOLS`, force frame during initiation |
+| 4 | Partial initiation = permanent limbo | 🏗️😈 | Check `is_initiated` flag, not `len(identity)`. Three states: UNINITIATED/IN_PROGRESS/COMPLETE |
+| 5 | Existing deployments get "I'm new!" treatment | 🏗️😈 | Auto-detect existing facts at startup, auto-seed + mark initiated |
+| 6 | `store_identity` section names don't match `SECTIONS` | 🔬😈 | Align tool schema with SECTIONS, drop `user_profile`, validate input |
+| 7 | IdentityManager in both CognitiveLayer AND ContextEngine | 🏗️ | Load identity once in CognitiveLayer, pass string to ContextEngine |
+| 8 | `status` stored as identity section (semantic mismatch) | 🏗️😈 | Add `is_initiated BOOLEAN` to `nous_system.agents` table instead |
+| 9 | `DISTINCT ON` versioning is complex | 🏗️ | Add `is_current BOOLEAN` column, simple WHERE filter |
+| 10 | Race condition on concurrent first messages | 🔬😈 | Atomic INSERT with ON CONFLICT for initiation claim |
+| 11 | Normal tools available during initiation | 😈 | Initiation frame restricts tools to `store_identity` + `complete_initiation` only |
+| 12 | Migration numbered 008 (no 007) | 🔬 | Renumber to `007_agent_identity.sql` |
+| 13 | Identity should be cached | 🏗️ | 60s TTL cache on IdentityManager, invalidated on update |
 
 ## Problem
 
