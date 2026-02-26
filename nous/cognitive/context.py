@@ -229,6 +229,9 @@ class ContextEngine:
                 limit = _limits.get("decision", 5)
                 q_text = _query_texts.get("decision", _default_query)
                 decisions = await self._brain.query(q_text, limit=limit, session=session)
+                logger.info("Tier3 decisions: %d results, has_embeddings=%s, scores=%s",
+                    len(decisions) if decisions else 0, self._has_embeddings,
+                    [round(getattr(d, "score", 0) or 0, 3) for d in (decisions or [])[:5]])
                 if decisions and self._has_embeddings:
                     # Tier 3: min_score threshold (only with embeddings — keyword scores too low)
                     decisions = [d for d in decisions if (getattr(d, "score", None) or 0) >= TIER3_THRESHOLDS["decision"]]
@@ -269,6 +272,9 @@ class ContextEngine:
                     q_text, limit=limit, session=session,
                     exclude_categories=TIER1_FACT_CATEGORIES,
                 )
+                logger.info("Tier3 facts: %d results, has_embeddings=%s, scores=%s",
+                    len(facts) if facts else 0, self._has_embeddings,
+                    [round(getattr(f, "score", 0) or 0, 3) for f in (facts or [])[:5]])
                 if facts and self._has_embeddings:
                     # Tier 3: min_score threshold (only with embeddings)
                     facts = [f for f in facts if (getattr(f, "score", None) or 0) >= TIER3_THRESHOLDS["fact"]]
