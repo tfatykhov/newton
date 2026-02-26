@@ -54,10 +54,10 @@ def register_identity_tools(dispatcher: ToolDispatcher, identity_manager: Identi
     async def complete_initiation() -> dict[str, Any]:
         """Mark initiation as complete."""
         try:
-            # P2-4: Validate that at least character + user_profile exist
-            identity = await identity_manager.get_identity()
+            # P2-4: Validate that at least character + preferences exist
+            identity = await identity_manager.get_current()
             stored = set(identity.keys())
-            required = {"character", "user_profile"}
+            required = {"character", "preferences"}
             missing = required - stored
             if missing:
                 return _mcp_response(
