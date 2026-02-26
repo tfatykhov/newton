@@ -51,6 +51,7 @@ class ContextBudget(BaseModel):
 
     total: int = 8000
     identity: int = 500
+    user_profile: int = 200  # Tier 1: preference/person/rule facts (always loaded)
     censors: int = 300
     frame: int = 500
     working_memory: int = 700

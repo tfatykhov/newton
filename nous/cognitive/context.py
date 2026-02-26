@@ -24,6 +24,9 @@ from nous.heart.search import apply_frame_boost
 
 logger = logging.getLogger(__name__)
 
+# Tier 1 fact categories — loaded by category (always-on), excluded from Tier 3 search
+TIER1_FACT_CATEGORIES = ["preference", "person", "rule"]
+
 
 class ContextEngine:
     """Assembles context from Brain and Heart within token budgets."""
@@ -126,6 +129,28 @@ class ContextEngine:
                 )
             )
 
+        # 1b. User Profile (Tier 1 — always loaded, no semantic search)
+        if budget.user_profile > 0:
+            try:
+                profile_facts = await self._heart.list_facts_by_category(
+                    categories=TIER1_FACT_CATEGORIES,
+                    active_only=True,
+                    session=session,
+                )
+                if profile_facts:
+                    profile_text = self._format_facts(profile_facts)
+                    profile_text = self._truncate_to_budget(profile_text, budget.user_profile)
+                    sections.append(
+                        ContextSection(
+                            priority=1,
+                            label="User Profile",
+                            content=profile_text,
+                            token_estimate=self._estimate_tokens(profile_text),
+                        )
+                    )
+            except Exception:
+                logger.warning("Failed to load user profile facts for Tier 1 context")
+
         # 2. Censors (P2-5: per-section isolation)
         if budget.censors > 0:
             try:
@@ -192,6 +217,9 @@ class ContextEngine:
                 q_text = _query_texts.get("decision", _default_query)
                 decisions = await self._brain.query(q_text, limit=limit, session=session)
                 if decisions:
+                    # Tier 3: min_score threshold
+                    decisions = [d for d in decisions if (getattr(d, "score", None) or 0) >= 0.3]
+                if decisions:
                     # 007.2: Diversity filter — use category as topic key
                     decisions = self._enforce_diversity(decisions, "category", max_per_subject=3)
                     # F1: Collect recalled IDs
@@ -223,7 +251,14 @@ class ContextEngine:
             try:
                 limit = _limits.get("fact", 5)
                 q_text = _query_texts.get("fact", _default_query)
-                facts = await self._heart.search_facts(q_text, limit=limit, session=session)
+                # Tier 3: exclude Tier 1 categories from semantic search
+                facts = await self._heart.search_facts(
+                    q_text, limit=limit, session=session,
+                    exclude_categories=TIER1_FACT_CATEGORIES,
+                )
+                if facts:
+                    # Tier 3: min_score threshold
+                    facts = [f for f in facts if (getattr(f, "score", None) or 0) >= 0.25]
                 if facts:
                     # F10: apply_frame_boost (preserved from existing pipeline)
                     facts = apply_frame_boost(facts, frame.frame_id, _active_censor_names)
@@ -266,6 +301,9 @@ class ContextEngine:
                 q_text = _query_texts.get("procedure", _default_query)
                 procedures = await self._heart.search_procedures(q_text, limit=limit, session=session)
                 if procedures:
+                    # Tier 3: min_score threshold
+                    procedures = [p for p in procedures if (getattr(p, "score", None) or 0) >= 0.3]
+                if procedures:
                     # F10: apply_frame_boost
                     procedures = apply_frame_boost(procedures, frame.frame_id, _active_censor_names)
 
@@ -299,6 +337,9 @@ class ContextEngine:
                 limit = _limits.get("episode", 5)
                 q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
+                if episodes:
+                    # Tier 3: min_score threshold
+                    episodes = [e for e in episodes if (getattr(e, "score", None) or 0) >= 0.3]
                 if episodes:
                     # F10: apply_frame_boost
                     episodes = apply_frame_boost(episodes, frame.frame_id, _active_censor_names)
