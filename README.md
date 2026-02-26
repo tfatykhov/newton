@@ -284,8 +284,11 @@ All core architecture is implemented and running:
 | Context Engine (F005) | ✅ Shipped | Intent-driven retrieval, token budgets, dedup |
 | Event Bus (F006) | ✅ Shipped | In-process async bus with automated handlers |
 | Memory Improvements (F010) | ✅ Shipped | Episode summaries, fact extraction, user tagging |
+| Context Quality (006.2) | ✅ Shipped | Fact supersession, episode dedup, abandoned filtering |
+| Extended Thinking (007) | ✅ Shipped | Adaptive thinking, interleaved reasoning, thinking indicators |
+| Context Recall (007.2-007.5) | ✅ Shipped | Topic-aware recall, informational detection, relevance thresholds |
 
-**Stats:** ~11,800 lines of Python · 424 tests · 18 Postgres tables · Docker deployment
+**Stats:** ~13,800 lines of Python · 638 tests · 18 Postgres tables · Docker deployment
 
 See [Feature Index](docs/features/INDEX.md) for the full breakdown.
 

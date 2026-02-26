@@ -44,6 +44,13 @@ All shipped implementation specs with PR references:
 | 005.4 | Streaming Responses | ✅ Shipped | #23 |
 | 005.5 | Noise Reduction | ✅ Shipped | #20 |
 | 006 | Event Bus | ✅ Shipped | — |
+| 006.2 | Context Quality | ✅ Shipped | #31 |
+| 007 | Extended Thinking | ✅ Shipped | — |
+| 007.1 | Thinking Indicators | ✅ Shipped | #53 |
+| 007.2 | Topic-Aware Recall | ✅ Shipped | #55 |
+| 007.3 | Improve _is_informational() | ✅ Shipped | #55 |
+| 007.4 | Fix Unpopulated Columns | ✅ Shipped | #55 |
+| 007.5 | Recall Min Threshold | ✅ Shipped | #59 |
 
 ### v0.2.0 Preview (Future)
 | Feature | Name | Description |
