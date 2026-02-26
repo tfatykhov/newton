@@ -11,6 +11,9 @@ Endpoints:
   GET  /censors           - Active censors (Heart)
   GET  /frames            - Available frames
   GET  /calibration       - Calibration report (Brain)
+  GET  /identity          - Get current agent identity
+  PUT  /identity/{section} - Update an identity section
+  POST /reinitiate        - Reset identity and re-run initiation
   GET  /health            - Health check (DB connectivity)
 """
 
@@ -44,6 +47,7 @@ def create_app(
     database: Database,
     settings: Settings,
     lifespan: Any | None = None,
+    identity_manager: Any | None = None,
 ) -> Starlette:
     """Create the Starlette ASGI app with all routes."""
 
@@ -326,6 +330,67 @@ def create_app(
         except Exception as e:
             return JSONResponse({"status": "unhealthy", "error": str(e)}, status_code=503)
 
+    # ------------------------------------------------------------------
+    # 008: Identity endpoints
+    # ------------------------------------------------------------------
+
+    async def get_identity(request: Request) -> JSONResponse:
+        """GET /identity - Get current agent identity sections."""
+        if identity_manager is None:
+            return JSONResponse({"error": "Identity manager not initialized"}, status_code=503)
+        try:
+            sections = await identity_manager.get_current()
+            is_initiated = await identity_manager.is_initiated()
+            return JSONResponse({
+                "agent_id": identity_manager.agent_id,
+                "is_initiated": is_initiated,
+                "sections": sections,
+            })
+        except Exception as e:
+            logger.error("GET /identity failed: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def update_identity_section(request: Request) -> JSONResponse:
+        """PUT /identity/{section} - Update an identity section."""
+        if identity_manager is None:
+            return JSONResponse({"error": "Identity manager not initialized"}, status_code=503)
+
+        section = request.path_params["section"]
+        from nous.identity.manager import VALID_SECTIONS
+        if section not in VALID_SECTIONS:
+            return JSONResponse(
+                {"error": f"Invalid section '{section}'. Valid: {', '.join(sorted(VALID_SECTIONS))}"},
+                status_code=400,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+        content = body.get("content")
+        if not content or not isinstance(content, str):
+            return JSONResponse({"error": "Missing or invalid 'content' field"}, status_code=400)
+
+        updated_by = body.get("updated_by", "api")
+        try:
+            await identity_manager.update_section(section, content, updated_by=updated_by)
+            return JSONResponse({"status": "updated", "section": section})
+        except Exception as e:
+            logger.error("PUT /identity/%s failed: %s", section, e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def reinitiate(request: Request) -> JSONResponse:
+        """POST /reinitiate - Reset identity and re-run initiation protocol."""
+        if identity_manager is None:
+            return JSONResponse({"error": "Identity manager not initialized"}, status_code=503)
+        try:
+            await identity_manager.reset_identity()
+            return JSONResponse({"status": "reset", "message": "Identity cleared. Next conversation will trigger initiation."})
+        except Exception as e:
+            logger.error("POST /reinitiate failed: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     routes = [
         Route("/chat", chat, methods=["POST"]),
         Route("/chat/stream", chat_stream, methods=["POST"]),
@@ -338,6 +403,9 @@ def create_app(
         Route("/censors", list_censors),
         Route("/frames", list_frames),
         Route("/calibration", calibration),
+        Route("/identity", get_identity),
+        Route("/identity/{section}", update_identity_section, methods=["PUT"]),
+        Route("/reinitiate", reinitiate, methods=["POST"]),
         Route("/health", health),
     ]
 

@@ -168,6 +168,36 @@ class IdentityManager:
                 await _mark(s)
                 await s.commit()
 
+    async def reset_identity(self, session: AsyncSession | None = None) -> None:
+        """Reset identity — deactivate all sections and clear is_initiated flag.
+
+        Used by POST /reinitiate to trigger fresh initiation on next conversation.
+        """
+        async def _reset(s: AsyncSession) -> None:
+            # Deactivate all current identity sections
+            await s.execute(
+                update(AgentIdentity)
+                .where(
+                    AgentIdentity.agent_id == self.agent_id,
+                    AgentIdentity.is_current == True,  # noqa: E712
+                )
+                .values(is_current=False)
+            )
+            # Reset is_initiated flag
+            await s.execute(
+                update(Agent)
+                .where(Agent.id == self.agent_id)
+                .values(is_initiated=False)
+            )
+
+        self._invalidate_cache()
+        if session is not None:
+            await _reset(session)
+        else:
+            async with self.db.session() as s:
+                await _reset(s)
+                await s.commit()
+
     async def claim_initiation(self, session: AsyncSession) -> bool:
         """Atomically claim initiation ownership.
 
