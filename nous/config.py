@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     web_search_daily_limit: int = 100  # Max web searches per day
     web_fetch_max_chars: int = 10000  # Default max chars for web_fetch
 
+    # Tool execution
+    tool_timeout: int = Field(
+        default=120, validation_alias="NOUS_TOOL_TIMEOUT"
+    )  # Max seconds for any single tool execution
+    keepalive_interval: int = Field(
+        default=10, validation_alias="NOUS_KEEPALIVE_INTERVAL"
+    )  # Seconds between keepalive events during tool execution
+
     # Compaction: Layer 1 (Tool Pruning)
     tool_pruning_enabled: bool = Field(
         default=True, validation_alias="NOUS_TOOL_PRUNING_ENABLED"

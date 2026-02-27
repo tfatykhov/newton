@@ -798,13 +798,14 @@ class AgentRunner:
                 for tc in tool_calls:
                     yield StreamEvent(type="tool_start", tool_name=tc["name"])
                     start_time = time.monotonic()
-                    try:
-                        result_text, is_error = await self._dispatcher.dispatch(
-                            tc["name"], tc["input"]
-                        )
-                    except Exception as e:
-                        result_text = str(e)
-                        is_error = True
+                    result_text, is_error = "", False
+                    async for item in self._dispatch_with_keepalive(
+                        tc["name"], tc["input"]
+                    ):
+                        if isinstance(item, StreamEvent):
+                            yield item
+                        else:
+                            result_text, is_error = item
                     duration_ms = int((time.monotonic() - start_time) * 1000)
 
                     tool_results_for_message.append({
@@ -1160,6 +1161,47 @@ Rules:
 
         self._conversations[session_id] = conversation
         return conversation
+
+    async def _dispatch_with_keepalive(
+        self, name: str, args: dict[str, Any]
+    ) -> AsyncGenerator[StreamEvent | tuple[str, bool], None]:
+        """Execute a tool, yielding keepalive events during long execution.
+
+        Yields StreamEvent(type="keepalive") every `keepalive_interval` seconds
+        while the tool is running. The final yield is a tuple (result_text, is_error).
+        If the tool exceeds `tool_timeout`, it is cancelled and an error is returned.
+        """
+        interval = self._settings.keepalive_interval
+        timeout = self._settings.tool_timeout
+
+        task = asyncio.create_task(
+            asyncio.wait_for(
+                self._dispatcher.dispatch(name, args),
+                timeout=timeout,
+            )
+        )
+
+        while not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=interval)
+            except TimeoutError:
+                if task.done():
+                    break
+                yield StreamEvent(type="keepalive")
+            except Exception:
+                # Task raised — will be handled below via task.result()
+                break
+
+        try:
+            result_text, is_error = task.result()
+        except TimeoutError:
+            result_text = f"Tool '{name}' timed out after {timeout}s"
+            is_error = True
+        except Exception as e:
+            result_text = str(e)
+            is_error = True
+
+        yield (result_text, is_error)
 
     def _format_messages(self, conversation: Conversation) -> list[dict[str, Any]]:
         """Format conversation history for API calls. Pure, sync, no side effects.
