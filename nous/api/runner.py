@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from nous.api.compaction import ConversationCompactor
-from nous.api.models import ApiResponse, Conversation, Message
+from nous.api.models import ApiResponse, Conversation, Message  # noqa: F401 — re-exported for backward compat
 from nous.brain.brain import Brain
 from nous.cognitive.layer import CognitiveLayer
 from nous.cognitive.schemas import ToolResult, TurnContext, TurnResult
@@ -787,12 +787,10 @@ class AgentRunner:
             self._check_safety_net(turn_context, all_tool_results)
             conversation.turn_contexts.append(turn_context)
 
-        # Calibrate token estimator from accumulated streaming usage
-        if self._compactor and total_usage.get("input_tokens"):
-            input_chars = sum(len(str(m.get("content", ""))) for m in messages)
-            self._compactor.estimator.calibrate(
-                input_chars, total_usage["input_tokens"]
-            )
+        # Note: streaming calibration skipped — accumulated total_usage across
+        # multiple tool iterations would bias the per-char ratio. The _tool_loop
+        # path calibrates per-call which is more accurate. Streaming-only turns
+        # (no tools) are typically short Telegram messages where chars/4 is fine.
 
         yield StreamEvent(type="done", stop_reason="end_turn", usage=total_usage)
 

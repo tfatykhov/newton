@@ -340,6 +340,11 @@ class TestFindCutPoint:
         ]
         assert compactor.find_cut_point(messages, keep_recent_tokens=10000) == 0
 
+    def test_should_compact_disabled(self):
+        compactor = ConversationCompactor(_make_settings())
+        # compaction_enabled defaults to False
+        assert compactor.should_compact(5000, 200000) is False
+
     def test_snaps_to_user_boundary(self):
         compactor = ConversationCompactor(_make_settings())
         messages = [
@@ -350,5 +355,5 @@ class TestFindCutPoint:
         ]
         # With keep_recent_tokens very small, should cut early but at user boundary
         cut = compactor.find_cut_point(messages, keep_recent_tokens=300)
-        if cut > 0:
-            assert messages[cut]["role"] == "user"
+        assert cut > 0, "Should need to cut with only 300 token budget"
+        assert messages[cut]["role"] == "user"

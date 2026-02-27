@@ -130,6 +130,16 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
+    def _validate_compaction(self) -> "Settings":
+        if self.tool_soft_trim_head + self.tool_soft_trim_tail >= self.tool_soft_trim_chars:
+            raise ValueError(
+                f"tool_soft_trim_head ({self.tool_soft_trim_head}) + "
+                f"tool_soft_trim_tail ({self.tool_soft_trim_tail}) must be < "
+                f"tool_soft_trim_chars ({self.tool_soft_trim_chars})"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_thinking(self) -> "Settings":
         if self.thinking_mode == "manual":
             if self.thinking_budget < 1024:
