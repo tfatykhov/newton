@@ -221,7 +221,11 @@ class ContextEngine:
             )
 
         # 007.2: Topic-enhanced default query — prefix with current_topic
-        _default_query = f"{current_topic}: {input_text}" if current_topic else input_text
+        # Skip prefix if topic duplicates input (set from raw user_input in layer.py)
+        if current_topic and current_topic.strip().lower() != input_text.strip().lower():
+            _default_query = f"{current_topic}: {input_text}"
+        else:
+            _default_query = input_text
         logger.info("Context build query: topic=%r, input=%r, default_query=%r", current_topic, input_text, _default_query)
 
         # 5. Decisions (F26: skip_types is primary skip mechanism)
