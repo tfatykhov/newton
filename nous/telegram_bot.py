@@ -590,6 +590,22 @@ class NousTelegramBot:
 
         streamer = StreamingMessage(self, chat_id)
 
+        # Background task: send typing indicator every 4s while streaming
+        typing_active = True
+
+        async def _typing_loop():
+            while typing_active:
+                try:
+                    await self._tg(
+                        "sendChatAction",
+                        params={"chat_id": chat_id, "action": "typing"},
+                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(4)
+
+        typing_task = asyncio.create_task(_typing_loop())
+
         try:
             async with self._http.stream(
                 "POST",
@@ -601,33 +617,22 @@ class NousTelegramBot:
                     await self._send(chat_id, f"\u274c Error: {error_body.decode()[:200]}")
                     return
 
-                # Track last text time for typing indicator refresh during
-                # extended thinking (thinking may take 10-30s with no text)
-                last_text_time = time.time()
-
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
                     event = json.loads(line[6:])
 
                     if event.get("type") == "text_delta":
-                        last_text_time = time.time()
                         await streamer.append_text(event.get("text", ""))
                     elif event.get("type") == "thinking_start":
                         await streamer.start_thinking()
                     elif event.get("type") == "thinking_delta":
-                        last_text_time = time.time()
                         await streamer.append_thinking(event.get("text", ""))
                     elif event.get("type") == "redacted_thinking":
                         await streamer.start_thinking()
                     elif event.get("type") == "keepalive":
-                        await self._tg(
-                            "sendChatAction",
-                            params={"chat_id": chat_id, "action": "typing"},
-                        )
-                        last_text_time = time.time()
+                        pass  # typing_loop handles indicators
                     elif event.get("type") == "tool_start":
-                        last_text_time = time.time()
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
                     elif event.get("type") == "error":
                         await self._send(chat_id, f"\u274c {event.get('text', 'Unknown error')}")
@@ -637,17 +642,18 @@ class NousTelegramBot:
                             streamer.set_usage(event["usage"])
                         break
 
-                    # Re-send typing indicator if no text for >4s (extended thinking)
-                    if time.time() - last_text_time > 4.0:
-                        await self._tg("sendChatAction", params={"chat_id": chat_id, "action": "typing"})
-                        last_text_time = time.time()
-
         except httpx.TimeoutException:
             await self._send(chat_id, "\u23f1 Request timed out.")
         except Exception as e:
             logger.error("Streaming chat error: %s", e)
             await self._send(chat_id, f"\u274c Error: {e}")
         finally:
+            typing_active = False
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
             await streamer.finalize()
 
     async def _send(self, chat_id: int, text: str, parse_mode: str | None = None) -> dict:
