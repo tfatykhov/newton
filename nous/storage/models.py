@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for all 18 Nous tables across 3 schemas."""
+"""SQLAlchemy ORM models for all 20 Nous tables across 3 schemas."""
 
 import uuid
 from datetime import datetime
@@ -293,7 +293,7 @@ class CalibrationSnapshot(Base):
 
 
 # =============================================================================
-# HEART SCHEMA (7 tables)
+# HEART SCHEMA (8 tables)
 # =============================================================================
 
 
@@ -515,3 +515,21 @@ class WorkingMemory(Base):
     max_items: Mapped[int | None] = mapped_column(Integer, server_default="20")
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+
+
+class ConversationState(Base):
+    __tablename__ = "conversation_state"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "session_id", name="uq_conversation_state_agent_session"),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    agent_id: Mapped[str] = mapped_column(Text, nullable=False)
+    session_id: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    messages: Mapped[dict | None] = mapped_column(JSONB)
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    compaction_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())

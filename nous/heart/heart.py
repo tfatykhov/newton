@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.embeddings import EmbeddingProvider
@@ -40,6 +42,7 @@ from nous.heart.schemas import (
 )
 from nous.heart.working_memory import WorkingMemoryManager
 from nous.storage.database import Database
+from nous.storage.models import ConversationState
 
 logger = logging.getLogger(__name__)
 
@@ -392,6 +395,133 @@ class Heart:
     async def clear_working_memory(self, session_id: str, session: AsyncSession | None = None) -> None:
         """Clear working memory for session."""
         await self.working_memory.clear(session_id, session)
+
+    # ==================================================================
+    # Conversation State
+    # ==================================================================
+
+    async def save_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        summary: str | None,
+        messages: list[dict] | None,
+        turn_count: int,
+        compaction_count: int,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Upsert conversation state for a session."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._save_conversation_state(
+                    agent_id, session_id, summary, messages, turn_count, compaction_count, session
+                )
+                await session.commit()
+                return
+        await self._save_conversation_state(
+            agent_id, session_id, summary, messages, turn_count, compaction_count, session
+        )
+
+    async def _save_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        summary: str | None,
+        messages: list[dict] | None,
+        turn_count: int,
+        compaction_count: int,
+        session: AsyncSession,
+    ) -> None:
+        stmt = (
+            pg_insert(ConversationState)
+            .values(
+                agent_id=agent_id,
+                session_id=session_id,
+                summary=summary,
+                messages=messages,
+                turn_count=turn_count,
+                compaction_count=compaction_count,
+            )
+            .on_conflict_do_update(
+                constraint="uq_conversation_state_agent_session",
+                set_={
+                    "summary": summary,
+                    "messages": messages,
+                    "turn_count": turn_count,
+                    "compaction_count": compaction_count,
+                },
+            )
+        )
+        await session.execute(stmt)
+        await session.flush()
+
+    async def load_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        session: AsyncSession | None = None,
+    ) -> dict | None:
+        """Load conversation state for a session. Returns dict or None."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._load_conversation_state(agent_id, session_id, session)
+        return await self._load_conversation_state(agent_id, session_id, session)
+
+    async def _load_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        session: AsyncSession,
+    ) -> dict | None:
+        result = await session.execute(
+            select(ConversationState)
+            .where(ConversationState.agent_id == agent_id)
+            .where(ConversationState.session_id == session_id)
+        )
+        row = result.scalars().first()
+        if row is None:
+            return None
+        return {
+            "id": str(row.id),
+            "agent_id": row.agent_id,
+            "session_id": row.session_id,
+            "summary": row.summary,
+            "messages": row.messages,
+            "turn_count": row.turn_count,
+            "compaction_count": row.compaction_count,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+    async def delete_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Hard delete conversation state for a session."""
+        if session is None:
+            async with self.db.session() as session:
+                await self._delete_conversation_state(agent_id, session_id, session)
+                await session.commit()
+                return
+        await self._delete_conversation_state(agent_id, session_id, session)
+
+    async def _delete_conversation_state(
+        self,
+        agent_id: str,
+        session_id: str,
+        session: AsyncSession,
+    ) -> None:
+        result = await session.execute(
+            select(ConversationState)
+            .where(ConversationState.agent_id == agent_id)
+            .where(ConversationState.session_id == session_id)
+        )
+        row = result.scalars().first()
+        if row is not None:
+            await session.delete(row)
+            await session.flush()
 
     # ==================================================================
     # Unified Recall (P2-3: Reciprocal Rank Fusion)
