@@ -460,9 +460,11 @@ class Heart:
                 keys.append(memory_type)
                 results_list.append(exc)
 
-        # Apply RRF scoring (k=60)
-        k = 60
-        rrf_items: list[RecallResult] = []
+        # Use original hybrid search scores (vector + keyword) instead of
+        # RRF positional scores. All Heart sub-searches use the same
+        # hybrid_search() formula (0.7*vector + 0.3*keyword), so scores
+        # are directly comparable across memory types.
+        merged: list[RecallResult] = []
 
         for memory_type, raw_results in zip(keys, results_list):
             if isinstance(raw_results, Exception):
@@ -473,16 +475,16 @@ class Heart:
                 )
                 continue
 
-            for rank, item in enumerate(raw_results, start=1):
-                rrf_score = 1.0 / (k + rank)
-                recall_result = self._to_recall_result(memory_type, item, rrf_score)
+            for item in raw_results:
+                original_score = getattr(item, "score", None) or 0.0
+                recall_result = self._to_recall_result(memory_type, item, original_score)
                 if recall_result is not None:
-                    rrf_items.append(recall_result)
+                    merged.append(recall_result)
 
-        # Sort by RRF score DESC
-        rrf_items.sort(key=lambda r: r.score, reverse=True)
+        # Sort by original hybrid score DESC
+        merged.sort(key=lambda r: r.score, reverse=True)
 
-        return rrf_items[:limit]
+        return merged[:limit]
 
     def _to_recall_result(self, memory_type: str, item: object, score: float) -> RecallResult | None:
         """Convert a typed search result to a RecallResult."""
