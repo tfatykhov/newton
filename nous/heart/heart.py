@@ -406,10 +406,10 @@ class Heart:
     ) -> list[RecallResult]:
         """Search across ALL memory types, return ranked results.
 
-        Uses reciprocal rank fusion (RRF) for cross-type ranking:
-        score = 1 / (k + rank) where k=60 (standard constant).
-
-        Parallel sub-searches via asyncio.gather.
+        Results carry their original hybrid search scores (0.7*vector +
+        0.3*keyword for episodes/facts/procedures via hybrid_search(),
+        cosine similarity for censors). Since most sub-searches use the
+        same scoring formula, scores are directly comparable.
         """
         if session is None:
             async with self.db.session() as session:
@@ -460,9 +460,11 @@ class Heart:
                 keys.append(memory_type)
                 results_list.append(exc)
 
-        # Apply RRF scoring (k=60)
-        k = 60
-        rrf_items: list[RecallResult] = []
+        # Use original search scores instead of RRF positional scores.
+        # Episodes, facts, and procedures use hybrid_search() (0.7*vector
+        # + 0.3*keyword). Censors use cosine similarity. Scores are
+        # comparable enough for meaningful cross-type ranking.
+        merged: list[RecallResult] = []
 
         for memory_type, raw_results in zip(keys, results_list):
             if isinstance(raw_results, Exception):
@@ -473,16 +475,17 @@ class Heart:
                 )
                 continue
 
-            for rank, item in enumerate(raw_results, start=1):
-                rrf_score = 1.0 / (k + rank)
-                recall_result = self._to_recall_result(memory_type, item, rrf_score)
+            for item in raw_results:
+                raw = getattr(item, "score", None)
+                original_score = raw if raw is not None else 0.0
+                recall_result = self._to_recall_result(memory_type, item, original_score)
                 if recall_result is not None:
-                    rrf_items.append(recall_result)
+                    merged.append(recall_result)
 
-        # Sort by RRF score DESC
-        rrf_items.sort(key=lambda r: r.score, reverse=True)
+        # Sort by original hybrid score DESC
+        merged.sort(key=lambda r: r.score, reverse=True)
 
-        return rrf_items[:limit]
+        return merged[:limit]
 
     def _to_recall_result(self, memory_type: str, item: object, score: float) -> RecallResult | None:
         """Convert a typed search result to a RecallResult."""

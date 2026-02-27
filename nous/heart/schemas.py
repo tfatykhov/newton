@@ -234,6 +234,7 @@ class CensorMatch(BaseModel):
     action: CensorAction  # P3-2: Literal type
     reason: str
     domain: str | None
+    score: float | None = None  # Search relevance score
 
 
 # --- Working Memory ---
