@@ -119,6 +119,14 @@ async def create_components(settings: Settings) -> dict:
             logger.debug("FactExtractor not available yet")
 
         try:
+            from nous.handlers.knowledge_extractor import KnowledgeExtractor
+
+            if settings.compaction_enabled:
+                KnowledgeExtractor(heart, settings, bus, handler_http)
+        except ImportError:
+            logger.debug("KnowledgeExtractor not available yet")
+
+        try:
             from nous.handlers.session_monitor import SessionTimeoutMonitor
 
             session_monitor = SessionTimeoutMonitor(bus, settings, cognitive=cognitive)

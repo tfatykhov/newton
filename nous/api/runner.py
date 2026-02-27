@@ -289,7 +289,7 @@ class AgentRunner:
         10. Return (response_text, turn_context)
         """
         _agent_id = agent_id or self._settings.agent_id
-        conversation = self._get_or_create_conversation(session_id)
+        conversation = await self._get_or_create_conversation(session_id)
 
         # 2. Pre-turn (F4: plumb conversation_messages for dedup)
         # Filter to user messages first, then take last 8 (D7: window = user turns)
@@ -315,6 +315,37 @@ class AgentRunner:
         error = None
         try:
             system_prompt = self._build_system_prompt(turn_context, platform=platform)
+
+            # Layer 2: History compaction (Spec 008.1)
+            if self._compactor and self._settings.compaction_enabled:
+                messages = self._format_messages(conversation)
+                system_tokens = self._compactor.estimator.estimate(system_prompt)
+                history_tokens = self._compactor.estimator.estimate_messages(messages)
+                if self._compactor.should_compact(system_tokens, history_tokens):
+                    lock = self._compaction_locks.setdefault(session_id, asyncio.Lock())
+                    async with lock:
+                        messages = self._format_messages(conversation)
+                        history_tokens = self._compactor.estimator.estimate_messages(messages)
+                        if self._compactor.should_compact(system_tokens, history_tokens):
+                            cut_point = self._compactor.find_cut_point(
+                                messages, self._settings.keep_recent_tokens
+                            )
+                            if cut_point > 0:
+                                snapshot = messages[:cut_point]
+                                await self._cognitive.pre_compaction(
+                                    agent_id=_agent_id,
+                                    session_id=session_id,
+                                    message_snapshot=snapshot,
+                                )
+                                await self._compactor.compact(
+                                    conversation, messages,
+                                    call_api=self._call_api,
+                                    cut_point=cut_point,
+                                )
+                                await self._save_conversation(
+                                    _agent_id, session_id, conversation
+                                )
+
             response_text, tool_results, usage = await self._tool_loop(
                 system_prompt=system_prompt,
                 conversation=conversation,
@@ -378,8 +409,10 @@ class AgentRunner:
 
         await self._cognitive.end_session(_agent_id, session_id, reflection=reflection)
 
-        # Remove conversation
+        # Remove conversation + persisted state (008.1 Phase 3)
         self._conversations.pop(session_id, None)
+        self._compaction_locks.pop(session_id, None)
+        await self._delete_conversation_state(session_id)
 
     # ------------------------------------------------------------------
     # API call
@@ -568,7 +601,7 @@ class AgentRunner:
             raise RuntimeError("No tool dispatcher set -- call set_dispatcher() first")
 
         _agent_id = agent_id or self._settings.agent_id
-        conversation = self._get_or_create_conversation(session_id)
+        conversation = await self._get_or_create_conversation(session_id)
 
         # Pre-turn with conversation dedup (F4)
         recent_messages = [
@@ -604,10 +637,21 @@ class AgentRunner:
                             messages, self._settings.keep_recent_tokens
                         )
                         if cut_point > 0:
+                            # 008.1 Phase 3: Snapshot for event handlers (decoupled from mutation)
+                            snapshot = messages[:cut_point]
+                            await self._cognitive.pre_compaction(
+                                agent_id=_agent_id,
+                                session_id=session_id,
+                                message_snapshot=snapshot,
+                            )
                             await self._compactor.compact(
                                 conversation, messages,
                                 call_api=self._call_api,
                                 cut_point=cut_point,
+                            )
+                            # 008.1 Phase 3: Persist state after compaction
+                            await self._save_conversation(
+                                _agent_id, session_id, conversation
                             )
                             messages = self._format_messages(conversation)
 
@@ -1093,8 +1137,12 @@ Rules:
                 turn_context.decision_id,
             )
 
-    def _get_or_create_conversation(self, session_id: str) -> Conversation:
-        """Get existing or create new conversation with LRU eviction."""
+    async def _get_or_create_conversation(self, session_id: str) -> Conversation:
+        """Get existing or create new conversation with LRU eviction.
+
+        008.1 Phase 3: If conversation not in memory, check Heart for
+        persisted state (survives container restarts). Restore if found.
+        """
         if session_id in self._conversations:
             # Move to end (most recently used)
             self._conversations.move_to_end(session_id)
@@ -1105,7 +1153,11 @@ Rules:
             evicted_id, _ = self._conversations.popitem(last=False)
             self._compaction_locks.pop(evicted_id, None)
 
-        conversation = Conversation(session_id=session_id)
+        # 008.1 Phase 3: Try to restore from Heart persistence
+        conversation = await self._restore_conversation(session_id)
+        if conversation is None:
+            conversation = Conversation(session_id=session_id)
+
         self._conversations[session_id] = conversation
         return conversation
 
@@ -1130,3 +1182,72 @@ Rules:
             role_label = "User" if msg.role == "user" else "Assistant"
             lines.append(f"{role_label}: {msg.content}")
         return "\n\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Conversation persistence (008.1 Phase 3)
+    # ------------------------------------------------------------------
+
+    async def _save_conversation(
+        self, agent_id: str, session_id: str, conversation: Conversation
+    ) -> None:
+        """Persist conversation state to Heart after compaction."""
+        try:
+            messages_json = [
+                {"role": m.role, "content": m.content}
+                for m in conversation.messages
+            ]
+            await self._heart.save_conversation_state(
+                agent_id=agent_id,
+                session_id=session_id,
+                summary=conversation.summary,
+                messages=messages_json,
+                turn_count=len(conversation.turn_contexts),
+                compaction_count=conversation.compaction_count,
+            )
+            logger.debug("Saved conversation state for session %s", session_id)
+        except Exception:
+            logger.warning("Failed to save conversation state for session %s", session_id)
+
+    async def _restore_conversation(self, session_id: str) -> Conversation | None:
+        """Restore conversation from Heart persistence if available."""
+        try:
+            state = await self._heart.load_conversation_state(
+                agent_id=self._settings.agent_id,
+                session_id=session_id,
+            )
+            if state is None:
+                return None
+
+            messages_data = state.get("messages") or []
+            messages = [
+                Message(role=m["role"], content=m["content"])
+                for m in messages_data
+                if isinstance(m, dict) and "role" in m and "content" in m
+            ]
+
+            conversation = Conversation(
+                session_id=session_id,
+                messages=messages,
+                summary=state.get("summary"),
+                compaction_count=state.get("compaction_count", 0),
+            )
+            logger.info(
+                "Restored conversation for session %s (%d messages, %d compactions)",
+                session_id,
+                len(messages),
+                conversation.compaction_count,
+            )
+            return conversation
+        except Exception:
+            logger.warning("Failed to restore conversation for session %s", session_id)
+            return None
+
+    async def _delete_conversation_state(self, session_id: str) -> None:
+        """Remove persisted conversation state on session end."""
+        try:
+            await self._heart.delete_conversation_state(
+                agent_id=self._settings.agent_id,
+                session_id=session_id,
+            )
+        except Exception:
+            logger.debug("Failed to delete conversation state for session %s", session_id)

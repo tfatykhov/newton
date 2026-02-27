@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Nous Database Schema — init.sql
--- 19 tables across 3 schemas: nous_system (4), brain (8), heart (7)
+-- 21 tables across 3 schemas: nous_system (5), brain (8), heart (8)
 -- Embedding dimension: vector(1536) for text-embedding-3-small
 -- =============================================================================
 
@@ -226,7 +226,7 @@ CREATE TABLE brain.calibration_snapshots (
 );
 
 -- ===========================================================================
--- HEART SCHEMA (7 tables)
+-- HEART SCHEMA (8 tables)
 -- ===========================================================================
 
 -- ---------------------------------------------------------------------------
@@ -388,6 +388,22 @@ CREATE TABLE heart.working_memory (
     UNIQUE(agent_id, session_id)
 );
 
+-- ---------------------------------------------------------------------------
+-- heart.conversation_state — persisted conversation for compaction
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS heart.conversation_state (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    summary TEXT,
+    messages JSONB,
+    turn_count INT NOT NULL DEFAULT 0,
+    compaction_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(agent_id, session_id)
+);
+
 -- ===========================================================================
 -- INDEXES
 -- ===========================================================================
@@ -464,6 +480,9 @@ CREATE INDEX idx_censors_active ON heart.censors(active) WHERE active = TRUE;
 CREATE INDEX idx_censors_embedding ON heart.censors
     USING hnsw(embedding vector_cosine_ops);
 
+-- --- heart.conversation_state indexes ---
+CREATE INDEX idx_conversation_state_agent ON heart.conversation_state(agent_id);
+
 -- ===========================================================================
 -- TRIGGERS — auto-update updated_at
 -- ===========================================================================
@@ -483,4 +502,7 @@ CREATE TRIGGER set_updated_at BEFORE UPDATE ON heart.censors
     FOR EACH ROW EXECUTE FUNCTION update_timestamp();
 
 CREATE TRIGGER set_updated_at BEFORE UPDATE ON heart.working_memory
+    FOR EACH ROW EXECUTE FUNCTION update_timestamp();
+
+CREATE TRIGGER set_updated_at BEFORE UPDATE ON heart.conversation_state
     FOR EACH ROW EXECUTE FUNCTION update_timestamp();
