@@ -282,9 +282,12 @@ class CognitiveLayer:
 
         # 6. WORKING MEMORY — update focus
         # P1-7: Must call get_or_create before focus
+        # 007.2 spike: preserve current_task when input is ambiguous/short
         try:
             await self._heart.get_or_create_working_memory(session_id, session=session)
-            await self._heart.focus(session_id, user_input[:200], frame.frame_id, session=session)
+            focus_text = self._resolve_focus_text(user_input)
+            if focus_text is not None:
+                await self._heart.focus(session_id, focus_text, frame.frame_id, session=session)
         except Exception:
             logger.warning("Failed to update working memory for session %s", session_id)
 
@@ -475,6 +478,65 @@ class CognitiveLayer:
 
     # 007.3: Emoji header pattern — status dump indicator
     _EMOJI_HEADER_RE = re.compile(r"^[\U0001f300-\U0001f9ff\u2600-\u27bf]\s")
+
+    # 007.2 spike: pronouns and short phrases that signal a follow-up, not a new topic
+    _FOLLOWUP_PRONOUNS = {"it", "that", "this", "them", "they", "those", "these", "he", "she"}
+    _FOLLOWUP_STARTERS = (
+        "what about", "how about", "tell me more", "more about",
+        "and what", "and how", "what else", "anything else",
+        "go on", "continue", "keep going", "elaborate",
+    )
+    # Single-word question starters — only treated as follow-up when alone
+    _FOLLOWUP_QUESTION_WORDS = {"why", "how", "when", "where", "who"}
+    _FOLLOWUP_STOP_WORDS = frozenset({
+        "the", "and", "for", "are", "was", "were", "has", "have",
+        "does", "did", "can", "could", "would", "should", "will",
+        "not", "but", "with", "from", "about", "what", "how",
+        "is", "a", "an", "do", "its", "it's", "what's", "right",
+        "really", "sure", "just", "so", "then", "well", "ok",
+    })
+
+    def _resolve_focus_text(self, user_input: str) -> str | None:
+        """Return the text to set as current_task, or None to preserve existing topic.
+
+        Heuristic: if the input is short and looks like a follow-up
+        (pronouns, continuation phrases), keep the existing topic.
+        Only update when the user provides a clear new topic signal.
+        """
+        text = user_input.strip()
+        # Very short inputs are almost always follow-ups
+        if len(text) < 5:
+            return None
+
+        words = text.lower().split()
+        # Single pronoun or short pronoun phrase ("it works", "that one")
+        if len(words) <= 3 and words[0] in self._FOLLOWUP_PRONOUNS:
+            return None
+
+        text_lower = text.lower()
+
+        # Bare question word ("why?", "how?") — preserve topic
+        stripped = text_lower.rstrip("?!. ")
+        if stripped in self._FOLLOWUP_QUESTION_WORDS:
+            return None
+
+        # Starts with a follow-up phrase (tuple for efficient startswith)
+        for starter in self._FOLLOWUP_STARTERS:
+            if text_lower.startswith(starter):
+                # "tell me more about X" / "more about X" — if there's a clear object, use it
+                remainder = text_lower[len(starter):].strip()
+                if starter in ("tell me more", "more about") and len(remainder) > 3:
+                    return text[:200]
+                return None
+
+        # Pronoun-only subject (e.g., "what about that?", "is that right?")
+        if len(words) <= 5:
+            non_stop = [w.rstrip("?!.,") for w in words
+                        if w.rstrip("?!.,") not in self._FOLLOWUP_STOP_WORDS]
+            if non_stop and all(w in self._FOLLOWUP_PRONOUNS for w in non_stop):
+                return None
+
+        return text[:200]
 
     def _is_informational(self, turn_result: TurnResult) -> bool:
         """Detect responses that are information, not decisions (006.2, 007.3).
