@@ -1,7 +1,5 @@
 """Tests for Spec 008.1 Phase 1: Tool Output Pruning + Token Estimation."""
 
-import pytest
-
 from nous.api.compaction import ConversationCompactor, TokenEstimator
 from nous.config import Settings
 
