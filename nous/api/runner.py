@@ -669,7 +669,9 @@ class AgentRunner:
                 tool_calls: list[dict[str, Any]] = []
                 stop_reason = ""
 
-                async for event in self._call_api_stream(
+                # Emit keepalives while waiting for Anthropic's first byte —
+                # large contexts + thinking can cause long waits (008.1)
+                async for event in self._stream_with_keepalive(
                     system_prompt=system_prompt,
                     messages=messages,
                     tools=tools if tools else None,
@@ -1161,6 +1163,37 @@ Rules:
 
         self._conversations[session_id] = conversation
         return conversation
+
+    async def _stream_with_keepalive(
+        self,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Wrap _call_api_stream with keepalive events during initial wait.
+
+        Emits keepalives every keepalive_interval seconds until the first
+        real event arrives from Anthropic. After that, events flow directly.
+        """
+        interval = self._settings.keepalive_interval
+        stream = self._call_api_stream(system_prompt, messages, tools)
+        got_first = False
+
+        while not got_first:
+            try:
+                event = await asyncio.wait_for(
+                    stream.__anext__(), timeout=interval
+                )
+                got_first = True
+                yield event
+            except StopAsyncIteration:
+                return
+            except TimeoutError:
+                yield StreamEvent(type="keepalive")
+
+        # After first event, pass through directly
+        async for event in stream:
+            yield event
 
     async def _dispatch_with_keepalive(
         self, name: str, args: dict[str, Any]
