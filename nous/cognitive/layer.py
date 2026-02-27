@@ -285,7 +285,7 @@ class CognitiveLayer:
         # 007.2 spike: preserve current_task when input is ambiguous/short
         try:
             await self._heart.get_or_create_working_memory(session_id, session=session)
-            focus_text = self._resolve_focus_text(user_input, session_id)
+            focus_text = self._resolve_focus_text(user_input)
             if focus_text is not None:
                 await self._heart.focus(session_id, focus_text, frame.frame_id, session=session)
         except Exception:
@@ -481,15 +481,22 @@ class CognitiveLayer:
 
     # 007.2 spike: pronouns and short phrases that signal a follow-up, not a new topic
     _FOLLOWUP_PRONOUNS = {"it", "that", "this", "them", "they", "those", "these", "he", "she"}
-    _FOLLOWUP_STARTERS = {
+    _FOLLOWUP_STARTERS = (
         "what about", "how about", "tell me more", "more about",
         "and what", "and how", "what else", "anything else",
         "go on", "continue", "keep going", "elaborate",
-    }
+    )
     # Single-word question starters — only treated as follow-up when alone
     _FOLLOWUP_QUESTION_WORDS = {"why", "how", "when", "where", "who"}
+    _FOLLOWUP_STOP_WORDS = frozenset({
+        "the", "and", "for", "are", "was", "were", "has", "have",
+        "does", "did", "can", "could", "would", "should", "will",
+        "not", "but", "with", "from", "about", "what", "how",
+        "is", "a", "an", "do", "its", "it's", "what's", "right",
+        "really", "sure", "just", "so", "then", "well", "ok",
+    })
 
-    def _resolve_focus_text(self, user_input: str, session_id: str) -> str | None:
+    def _resolve_focus_text(self, user_input: str) -> str | None:
         """Return the text to set as current_task, or None to preserve existing topic.
 
         Heuristic: if the input is short and looks like a follow-up
@@ -513,25 +520,19 @@ class CognitiveLayer:
         if stripped in self._FOLLOWUP_QUESTION_WORDS:
             return None
 
-        # Starts with a follow-up phrase
+        # Starts with a follow-up phrase (tuple for efficient startswith)
         for starter in self._FOLLOWUP_STARTERS:
             if text_lower.startswith(starter):
-                # "tell me more about X" — if there's a clear object, use it
+                # "tell me more about X" / "more about X" — if there's a clear object, use it
                 remainder = text_lower[len(starter):].strip()
-                if starter in ("tell me more", "more about") and len(remainder) > 10:
+                if starter in ("tell me more", "more about") and len(remainder) > 3:
                     return text[:200]
                 return None
 
         # Pronoun-only subject (e.g., "what about that?", "is that right?")
-        # but NOT "what's that about?" which has "what's" as a content word
         if len(words) <= 5:
-            _stop = {"the", "and", "for", "are", "was", "were", "has", "have",
-                     "does", "did", "can", "could", "would", "should", "will",
-                     "not", "but", "with", "from", "about", "what", "how",
-                     "is", "a", "an", "do", "its", "it's", "what's", "right",
-                     "really", "sure", "just", "so", "then", "well", "ok"}
             non_stop = [w.rstrip("?!.,") for w in words
-                        if w.rstrip("?!.,") not in _stop]
+                        if w.rstrip("?!.,") not in self._FOLLOWUP_STOP_WORDS]
             if non_stop and all(w in self._FOLLOWUP_PRONOUNS for w in non_stop):
                 return None
 
