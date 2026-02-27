@@ -397,7 +397,7 @@ class NousTelegramBot:
         self._offset = 0
         # Map telegram chat_id -> nous session_id for continuity
         self._sessions: dict[int, str] = {}
-        self._http = httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=120, write=10, pool=10))
+        self._http = httpx.AsyncClient(timeout=httpx.Timeout(connect=10, read=300, write=10, pool=10))
 
     async def start(self) -> None:
         """Start polling loop."""

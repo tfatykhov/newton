@@ -1177,23 +1177,44 @@ Rules:
         """
         interval = self._settings.keepalive_interval
         stream = self._call_api_stream(system_prompt, messages, tools)
-        got_first = False
 
-        while not got_first:
-            try:
-                event = await asyncio.wait_for(
-                    stream.__anext__(), timeout=interval
-                )
-                got_first = True
+        # Wait for first event with keepalives — use a persistent task
+        # to avoid cancelling the generator's __anext__ on timeout
+        next_task: asyncio.Task[StreamEvent] | None = None
+        try:
+            while True:
+                if next_task is None:
+                    next_task = asyncio.create_task(stream.__anext__())
+                try:
+                    event = await asyncio.wait_for(
+                        asyncio.shield(next_task), timeout=interval
+                    )
+                    next_task = None  # consumed
+                    yield event
+                    break  # got first event, switch to direct passthrough
+                except StopAsyncIteration:
+                    return
+                except TimeoutError:
+                    if next_task.done():
+                        # Task finished during our timeout handling
+                        try:
+                            yield next_task.result()
+                            next_task = None
+                            break
+                        except StopAsyncIteration:
+                            return
+                    yield StreamEvent(type="keepalive")
+
+            # After first event, pass through directly
+            async for event in stream:
                 yield event
-            except StopAsyncIteration:
-                return
-            except TimeoutError:
-                yield StreamEvent(type="keepalive")
-
-        # After first event, pass through directly
-        async for event in stream:
-            yield event
+        finally:
+            if next_task is not None and not next_task.done():
+                next_task.cancel()
+                try:
+                    await next_task
+                except (asyncio.CancelledError, StopAsyncIteration):
+                    pass
 
     async def _dispatch_with_keepalive(
         self, name: str, args: dict[str, Any]
