@@ -31,7 +31,7 @@ TIER1_FACT_CATEGORIES = ["preference", "person", "rule"]
 # When embeddings are unavailable, keyword-only scores are much lower (0.01-0.15)
 # so thresholds are skipped to avoid filtering everything out.
 TIER3_THRESHOLDS = {
-    "decision": 0.3,
+    "decision": 0.20,
     "fact": 0.25,
     "procedure": 0.3,
     "episode": 0.3,
