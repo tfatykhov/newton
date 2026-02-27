@@ -621,6 +621,10 @@ class NousTelegramBot:
                     elif event.get("type") == "redacted_thinking":
                         await streamer.start_thinking()
                     elif event.get("type") == "keepalive":
+                        await self._tg(
+                            "sendChatAction",
+                            params={"chat_id": chat_id, "action": "typing"},
+                        )
                         last_text_time = time.time()
                     elif event.get("type") == "tool_start":
                         last_text_time = time.time()
