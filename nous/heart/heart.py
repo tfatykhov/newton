@@ -406,10 +406,10 @@ class Heart:
     ) -> list[RecallResult]:
         """Search across ALL memory types, return ranked results.
 
-        Uses reciprocal rank fusion (RRF) for cross-type ranking:
-        score = 1 / (k + rank) where k=60 (standard constant).
-
-        Parallel sub-searches via asyncio.gather.
+        Results carry their original hybrid search scores (0.7*vector +
+        0.3*keyword for episodes/facts/procedures via hybrid_search(),
+        cosine similarity for censors). Since most sub-searches use the
+        same scoring formula, scores are directly comparable.
         """
         if session is None:
             async with self.db.session() as session:

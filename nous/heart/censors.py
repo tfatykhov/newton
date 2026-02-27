@@ -351,6 +351,7 @@ class CensorManager:
             return []
 
         ids = [row.id for row in rows]
+        scores = {row.id: float(row.similarity) for row in rows}
         censor_result = await session.execute(select(Censor).where(Censor.id.in_(ids)))
         censors = {c.id: c for c in censor_result.scalars().all()}
 
@@ -361,6 +362,7 @@ class CensorManager:
                 action=c.action,
                 reason=c.reason,
                 domain=c.domain,
+                score=scores.get(c.id),
             )
             for cid in ids
             if (c := censors.get(cid)) is not None
@@ -414,6 +416,7 @@ class CensorManager:
                 action=c.action,
                 reason=c.reason,
                 domain=c.domain,
+                score=1.0,  # ILIKE match = binary relevance
             )
             for cid in ids
             if (c := censors.get(cid)) is not None
