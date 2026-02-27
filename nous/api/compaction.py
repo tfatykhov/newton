@@ -349,6 +349,10 @@ class ConversationCompactor:
                 "Compaction failed: %s - falling back to truncation", e
             )
             conversation.messages = conversation.messages[cut_point:]
+            conversation.summary = None
+            conversation.compaction_count = max(
+                0, conversation.compaction_count - 1
+            )
             return
 
         # Rebuild messages with summary prefix
