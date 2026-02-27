@@ -3,7 +3,6 @@
 from nous.api.compaction import ConversationCompactor, TokenEstimator
 from nous.config import Settings
 
-
 # ------------------------------------------------------------------
 # TokenEstimator Tests
 # ------------------------------------------------------------------
