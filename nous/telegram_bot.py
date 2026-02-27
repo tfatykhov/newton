@@ -620,7 +620,10 @@ class NousTelegramBot:
                         await streamer.append_thinking(event.get("text", ""))
                     elif event.get("type") == "redacted_thinking":
                         await streamer.start_thinking()
+                    elif event.get("type") == "keepalive":
+                        last_text_time = time.time()
                     elif event.get("type") == "tool_start":
+                        last_text_time = time.time()
                         await streamer.append_tool_indicator(event.get("tool_name", ""))
                     elif event.get("type") == "error":
                         await self._send(chat_id, f"\u274c {event.get('text', 'Unknown error')}")

@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     web_search_daily_limit: int = 100  # Max web searches per day
     web_fetch_max_chars: int = 10000  # Default max chars for web_fetch
 
+    # Tool execution
+    tool_timeout: int = Field(
+        default=120, validation_alias="NOUS_TOOL_TIMEOUT"
+    )  # Max seconds for any single tool execution
+    keepalive_interval: int = Field(
+        default=10, validation_alias="NOUS_KEEPALIVE_INTERVAL"
+    )  # Seconds between keepalive events during tool execution
+
     # Compaction: Layer 1 (Tool Pruning)
     tool_pruning_enabled: bool = Field(
         default=True, validation_alias="NOUS_TOOL_PRUNING_ENABLED"
@@ -128,6 +136,15 @@ class Settings(BaseSettings):
     keep_recent_tokens: int = Field(
         default=20_000, validation_alias="NOUS_KEEP_RECENT_TOKENS"
     )
+
+    @model_validator(mode="after")
+    def _validate_keepalive(self) -> "Settings":
+        if self.keepalive_interval >= self.tool_timeout:
+            raise ValueError(
+                f"keepalive_interval ({self.keepalive_interval}) must be < "
+                f"tool_timeout ({self.tool_timeout})"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_compaction(self) -> "Settings":
