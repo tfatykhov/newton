@@ -476,7 +476,8 @@ class Heart:
                 continue
 
             for item in raw_results:
-                original_score = getattr(item, "score", None) or 0.0
+                raw = getattr(item, "score", None)
+                original_score = raw if raw is not None else 0.0
                 recall_result = self._to_recall_result(memory_type, item, original_score)
                 if recall_result is not None:
                     merged.append(recall_result)
