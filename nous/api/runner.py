@@ -18,6 +18,8 @@ from typing import Any
 
 import httpx
 
+from nous.api.compaction import ConversationCompactor
+from nous.api.models import ApiResponse, Conversation, Message
 from nous.brain.brain import Brain
 from nous.cognitive.layer import CognitiveLayer
 from nous.cognitive.schemas import ToolResult, TurnContext, TurnResult
@@ -45,32 +47,6 @@ FRAME_TOOLS: dict[str, list[str]] = {
 
 # Anthropic API version header (P0-1)
 _API_VERSION = "2023-06-01"
-
-
-@dataclass
-class Message:
-    """A single message in a conversation."""
-
-    role: str  # "user" or "assistant"
-    content: str
-
-
-@dataclass
-class Conversation:
-    """Tracks a multi-turn conversation."""
-
-    session_id: str
-    messages: list[Message] = field(default_factory=list)
-    turn_contexts: list[TurnContext] = field(default_factory=list)
-
-
-@dataclass
-class ApiResponse:
-    """Parsed response from Anthropic Messages API."""
-
-    content: list[dict[str, Any]]  # Raw content blocks from API
-    stop_reason: str  # end_turn, max_tokens, tool_use, stop_sequence
-    usage: dict[str, int] | None = None
 
 
 @dataclass
@@ -204,6 +180,11 @@ class AgentRunner:
         self._conversations: OrderedDict[str, Conversation] = OrderedDict()
         self._http: httpx.AsyncClient | None = None
         self._dispatcher: Any | None = None  # ToolDispatcher, set via set_dispatcher()
+
+        # Compaction (Spec 008.1)
+        self._compactor: ConversationCompactor | None = None
+        if settings.tool_pruning_enabled or settings.compaction_enabled:
+            self._compactor = ConversationCompactor(settings=settings)
 
     def set_dispatcher(self, dispatcher: Any) -> None:
         """Set the tool dispatcher for tool loop execution."""
@@ -770,6 +751,10 @@ class AgentRunner:
                     yield StreamEvent(type="tool_end", tool_name=tc["name"])
 
                 messages.append({"role": "user", "content": tool_results_for_message})
+
+                # Prune old tool results before next API call (Spec 008.1 Layer 1)
+                if self._compactor:
+                    self._compactor.prune_tool_results(messages)
             else:
                 # Max turns reached -- final call without tools
                 logger.warning("Streaming tool loop reached max_turns=%d", self._settings.max_turns)
@@ -801,6 +786,13 @@ class AgentRunner:
             await self._cognitive.post_turn(_agent_id, session_id, turn_result, turn_context)
             self._check_safety_net(turn_context, all_tool_results)
             conversation.turn_contexts.append(turn_context)
+
+        # Calibrate token estimator from accumulated streaming usage
+        if self._compactor and total_usage.get("input_tokens"):
+            input_chars = sum(len(str(m.get("content", ""))) for m in messages)
+            self._compactor.estimator.calibrate(
+                input_chars, total_usage["input_tokens"]
+            )
 
         yield StreamEvent(type="done", stop_reason="end_turn", usage=total_usage)
 
@@ -847,10 +839,15 @@ class AgentRunner:
                 tools=tools if tools else None,
             )
 
-            # Accumulate usage
+            # Accumulate usage + calibrate token estimator
             if api_response.usage:
                 total_usage["input_tokens"] += api_response.usage.get("input_tokens", 0)
                 total_usage["output_tokens"] += api_response.usage.get("output_tokens", 0)
+                if self._compactor:
+                    input_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                    self._compactor.estimator.calibrate(
+                        input_chars, api_response.usage.get("input_tokens", 0)
+                    )
 
             # If not a tool use, we're done
             if api_response.stop_reason != "tool_use":
@@ -898,6 +895,10 @@ class AgentRunner:
                 "role": "user",
                 "content": tool_results_for_message,
             })
+
+            # Prune old tool results before next API call (Spec 008.1 Layer 1)
+            if self._compactor:
+                self._compactor.prune_tool_results(messages)
 
             turns += 1
 

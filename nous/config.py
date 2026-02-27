@@ -98,6 +98,37 @@ class Settings(BaseSettings):
     web_search_daily_limit: int = 100  # Max web searches per day
     web_fetch_max_chars: int = 10000  # Default max chars for web_fetch
 
+    # Compaction: Layer 1 (Tool Pruning)
+    tool_pruning_enabled: bool = Field(
+        default=True, validation_alias="NOUS_TOOL_PRUNING_ENABLED"
+    )
+    tool_soft_trim_chars: int = Field(
+        default=4000, validation_alias="NOUS_TOOL_SOFT_TRIM_CHARS"
+    )
+    tool_soft_trim_head: int = Field(
+        default=1500, validation_alias="NOUS_TOOL_SOFT_TRIM_HEAD"
+    )
+    tool_soft_trim_tail: int = Field(
+        default=1500, validation_alias="NOUS_TOOL_SOFT_TRIM_TAIL"
+    )
+    tool_hard_clear_after: int = Field(
+        default=6, validation_alias="NOUS_TOOL_HARD_CLEAR_AFTER"
+    )
+    keep_last_tool_results: int = Field(
+        default=2, validation_alias="NOUS_KEEP_LAST_TOOL_RESULTS"
+    )
+
+    # Compaction: Layer 2 (History Compaction) — Phase 2
+    compaction_enabled: bool = Field(
+        default=False, validation_alias="NOUS_COMPACTION_ENABLED"
+    )
+    compaction_threshold: int = Field(
+        default=100_000, validation_alias="NOUS_COMPACTION_THRESHOLD"
+    )
+    keep_recent_tokens: int = Field(
+        default=20_000, validation_alias="NOUS_KEEP_RECENT_TOKENS"
+    )
+
     @model_validator(mode="after")
     def _validate_thinking(self) -> "Settings":
         if self.thinking_mode == "manual":
