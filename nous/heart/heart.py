@@ -460,10 +460,10 @@ class Heart:
                 keys.append(memory_type)
                 results_list.append(exc)
 
-        # Use original hybrid search scores (vector + keyword) instead of
-        # RRF positional scores. All Heart sub-searches use the same
-        # hybrid_search() formula (0.7*vector + 0.3*keyword), so scores
-        # are directly comparable across memory types.
+        # Use original search scores instead of RRF positional scores.
+        # Episodes, facts, and procedures use hybrid_search() (0.7*vector
+        # + 0.3*keyword). Censors use cosine similarity. Scores are
+        # comparable enough for meaningful cross-type ranking.
         merged: list[RecallResult] = []
 
         for memory_type, raw_results in zip(keys, results_list):
