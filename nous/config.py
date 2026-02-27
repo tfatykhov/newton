@@ -138,6 +138,15 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
+    def _validate_keepalive(self) -> "Settings":
+        if self.keepalive_interval >= self.tool_timeout:
+            raise ValueError(
+                f"keepalive_interval ({self.keepalive_interval}) must be < "
+                f"tool_timeout ({self.tool_timeout})"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_compaction(self) -> "Settings":
         if self.tool_soft_trim_head + self.tool_soft_trim_tail >= self.tool_soft_trim_chars:
             raise ValueError(

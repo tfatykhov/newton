@@ -1181,27 +1181,40 @@ Rules:
             )
         )
 
-        while not task.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=interval)
-            except TimeoutError:
-                if task.done():
-                    break
-                yield StreamEvent(type="keepalive")
-            except Exception:
-                # Task raised — will be handled below via task.result()
-                break
-
         try:
-            result_text, is_error = task.result()
-        except TimeoutError:
-            result_text = f"Tool '{name}' timed out after {timeout}s"
-            is_error = True
-        except Exception as e:
-            result_text = str(e)
-            is_error = True
+            while not task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(task), timeout=interval
+                    )
+                except TimeoutError:
+                    if task.done():
+                        break
+                    yield StreamEvent(type="keepalive")
+                except Exception:
+                    # Task raised — will be handled below via task.result()
+                    break
 
-        yield (result_text, is_error)
+            try:
+                result_text, is_error = task.result()
+            except TimeoutError:
+                logger.warning(
+                    "Tool '%s' timed out after %ds", name, timeout
+                )
+                result_text = f"Tool '{name}' timed out after {timeout}s"
+                is_error = True
+            except Exception as e:
+                result_text = str(e)
+                is_error = True
+
+            yield (result_text, is_error)
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     def _format_messages(self, conversation: Conversation) -> list[dict[str, Any]]:
         """Format conversation history for API calls. Pure, sync, no side effects.

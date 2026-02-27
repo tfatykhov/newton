@@ -138,6 +138,35 @@ class TestDispatchWithKeepalive:
             assert k.tool_name == ""
 
 
+    @pytest.mark.asyncio
+    async def test_generator_cleanup_cancels_task(self, runner):
+        """Closing the generator cancels the underlying task."""
+        task_started = asyncio.Event()
+        task_cancelled = asyncio.Event()
+
+        async def slow_dispatch(name, args):
+            task_started.set()
+            try:
+                await asyncio.sleep(100)
+                return ("never", False)
+            except asyncio.CancelledError:
+                task_cancelled.set()
+                raise
+
+        runner._dispatcher.dispatch = slow_dispatch
+
+        gen = runner._dispatch_with_keepalive("cancellable", {})
+        # Get first keepalive to ensure task is running
+        item = await gen.__anext__()
+        assert isinstance(item, StreamEvent)
+        assert item.type == "keepalive"
+        # Close the generator — should cancel the task
+        await gen.aclose()
+        # Give the event loop a tick to process cancellation
+        await asyncio.sleep(0.1)
+        assert task_cancelled.is_set()
+
+
 class TestConfigFields:
     """Tests for new config fields."""
 
@@ -154,5 +183,12 @@ class TestConfigFields:
         assert s.tool_timeout == 60
 
     def test_custom_keepalive_interval(self):
-        s = _make_settings(NOUS_KEEPALIVE_INTERVAL="5")
-        assert s.keepalive_interval == 5
+        s = _make_settings(NOUS_KEEPALIVE_INTERVAL="2", NOUS_TOOL_TIMEOUT="10")
+        assert s.keepalive_interval == 2
+
+    def test_keepalive_interval_must_be_less_than_timeout(self):
+        with pytest.raises(ValueError, match="keepalive_interval"):
+            _make_settings(
+                NOUS_KEEPALIVE_INTERVAL="120",
+                NOUS_TOOL_TIMEOUT="60",
+            )
