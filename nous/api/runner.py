@@ -185,6 +185,7 @@ class AgentRunner:
         self._compactor: ConversationCompactor | None = None
         if settings.tool_pruning_enabled or settings.compaction_enabled:
             self._compactor = ConversationCompactor(settings=settings)
+        self._compaction_locks: dict[str, asyncio.Lock] = {}
 
     def set_dispatcher(self, dispatcher: Any) -> None:
         """Set the tool dispatcher for tool loop execution."""
@@ -391,14 +392,16 @@ class AgentRunner:
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
         skip_thinking: bool = False,
+        model_override: str | None = None,
     ) -> dict[str, Any]:
         """Build Anthropic Messages API request payload.
 
         Shared by _call_api and _call_api_stream to avoid divergence.
         skip_thinking=True omits thinking params (for utility calls like reflection).
+        model_override replaces the default model (used by compaction summarization).
         """
         payload: dict[str, Any] = {
-            "model": self._settings.model,
+            "model": model_override or self._settings.model,
             "max_tokens": self._settings.max_tokens,
             "system": [
                 {
@@ -436,17 +439,22 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         skip_thinking: bool = False,
+        model_override: str | None = None,
     ) -> ApiResponse:
         """Call Anthropic Messages API with retry for 429/500/529.
 
         Returns parsed ApiResponse with content blocks and stop_reason.
         Raises RuntimeError on persistent errors.
         skip_thinking=True omits thinking params (for utility calls like reflection).
+        model_override replaces the default model (used by compaction summarization).
         """
         if not self._http:
             raise RuntimeError("httpx client not initialized -- call start() first")
 
-        payload = self._build_api_payload(system_prompt, messages, tools, skip_thinking=skip_thinking)
+        payload = self._build_api_payload(
+            system_prompt, messages, tools,
+            skip_thinking=skip_thinking, model_override=model_override,
+        )
 
         # Simple retry: 1x for 429/500/529
         last_error: Exception | None = None
@@ -580,6 +588,28 @@ class AgentRunner:
         system_prompt = self._build_system_prompt(turn_context, platform=platform)
         tools = self._dispatcher.available_tools(turn_context.frame.frame_id)
         messages = self._format_messages(conversation)
+
+        # Layer 2: History compaction (Spec 008.1)
+        if self._compactor and self._settings.compaction_enabled:
+            system_tokens = self._compactor.estimator.estimate(system_prompt)
+            history_tokens = self._compactor.estimator.estimate_messages(messages)
+            if self._compactor.should_compact(system_tokens, history_tokens):
+                lock = self._compaction_locks.setdefault(session_id, asyncio.Lock())
+                async with lock:
+                    # Re-check under lock (double-check pattern)
+                    messages = self._format_messages(conversation)
+                    history_tokens = self._compactor.estimator.estimate_messages(messages)
+                    if self._compactor.should_compact(system_tokens, history_tokens):
+                        cut_point = self._compactor.find_cut_point(
+                            messages, self._settings.keep_recent_tokens
+                        )
+                        if cut_point > 0:
+                            await self._compactor.compact(
+                                conversation, messages,
+                                call_api=self._call_api,
+                                cut_point=cut_point,
+                            )
+                            messages = self._format_messages(conversation)
 
         all_tool_results: list[ToolResult] = []
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
@@ -1072,25 +1102,30 @@ Rules:
 
         # Evict oldest if at capacity
         while len(self._conversations) >= MAX_CONVERSATIONS:
-            self._conversations.popitem(last=False)
+            evicted_id, _ = self._conversations.popitem(last=False)
+            self._compaction_locks.pop(evicted_id, None)
 
         conversation = Conversation(session_id=session_id)
         self._conversations[session_id] = conversation
         return conversation
 
     def _format_messages(self, conversation: Conversation) -> list[dict[str, Any]]:
-        """Format conversation history for API calls.
+        """Format conversation history for API calls. Pure, sync, no side effects.
 
-        Returns list of {"role": ..., "content": ...}.
-        Limits to last MAX_HISTORY_MESSAGES messages.
+        When compaction is enabled, returns ALL messages (compaction manages size).
+        Otherwise, limits to last MAX_HISTORY_MESSAGES messages (legacy behavior).
         """
+        if self._settings.compaction_enabled:
+            return [{"role": m.role, "content": m.content} for m in conversation.messages]
         recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
         return [{"role": m.role, "content": m.content} for m in recent]
 
     def _format_history_text(self, conversation: Conversation) -> str:
         """Format conversation history as readable text for reflection."""
-        recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
         lines = []
+        if conversation.summary:
+            lines.append(f"[Previous context summary]\n{conversation.summary}\n")
+        recent = conversation.messages[-MAX_HISTORY_MESSAGES:]
         for msg in recent:
             role_label = "User" if msg.role == "user" else "Assistant"
             lines.append(f"{role_label}: {msg.content}")
