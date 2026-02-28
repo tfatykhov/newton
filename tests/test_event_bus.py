@@ -3,7 +3,7 @@
 48 test cases across 8 test classes:
 - TestEventBus (8): Core bus mechanics
 - TestEpisodeSummarizer (7): Episode summary handler
-- TestFactExtractor (8): Fact extraction handler (#45: +2 for threshold change)
+- TestFactExtractor (12): Fact extraction handler (#45: +2 for threshold change, 008.4: +4 candidate_facts)
 - TestTranscriptCapture (3): Transcript accumulation in SessionMetadata
 - TestUserTagging (3): F010.5 user-tagged episodes
 - TestSessionTimeoutMonitor (7): Session timeout detection
@@ -684,6 +684,107 @@ class TestFactExtractor:
         await extractor.handle(event)
 
         heart.learn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_uses_candidate_facts_skips_llm(self):
+        """008.4: When candidate_facts present, store directly without LLM call."""
+        extractor, heart, bus, http_client = self._make_extractor()
+        heart.search_facts = AsyncMock(return_value=[])  # No duplicates
+        heart.learn = AsyncMock()
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {
+                    "summary": "Discussed architecture.",
+                    "key_points": ["chose PostgreSQL"],
+                },
+                "candidate_facts": [
+                    "Project uses PostgreSQL 17 with pgvector",
+                    "Tim prefers direct architecture decisions",
+                ],
+            },
+        )
+        await extractor.handle(event)
+
+        # LLM should NOT be called
+        http_client.post.assert_not_called()
+        # Both facts should be stored
+        assert heart.learn.call_count == 2
+        stored_contents = [call[0][0].content for call in heart.learn.call_args_list]
+        assert "Project uses PostgreSQL 17 with pgvector" in stored_contents
+        assert "Tim prefers direct architecture decisions" in stored_contents
+
+    @pytest.mark.asyncio
+    async def test_candidate_facts_deduped(self):
+        """008.4: candidate_facts are deduped against existing facts."""
+        extractor, heart, bus, http_client = self._make_extractor()
+
+        existing_fact = MagicMock(spec=FactSummary)
+        existing_fact.score = 0.90  # Above 0.85 -> deduped
+        heart.search_facts = AsyncMock(return_value=[existing_fact])
+        heart.learn = AsyncMock()
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {"summary": "Already known.", "key_points": []},
+                "candidate_facts": ["Project uses PostgreSQL"],
+            },
+        )
+        await extractor.handle(event)
+
+        http_client.post.assert_not_called()
+        heart.learn.assert_not_called()  # Deduped
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_llm_without_candidate_facts(self):
+        """008.4: When no candidate_facts, falls back to LLM extraction."""
+        facts_json = [
+            {"subject": "user", "content": "User likes tests", "category": "preference", "confidence": 0.9},
+        ]
+        extractor, heart, bus, http_client = self._make_extractor()
+        heart.search_facts = AsyncMock(return_value=[])
+        heart.learn = AsyncMock()
+        http_client.post = AsyncMock(
+            return_value=_mock_httpx_response(200, _llm_response(json.dumps(facts_json)))
+        )
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {"summary": "User likes testing.", "key_points": ["testing"]},
+                # No candidate_facts key at all
+            },
+        )
+        await extractor.handle(event)
+
+        # LLM SHOULD be called (fallback)
+        http_client.post.assert_called_once()
+        heart.learn.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_candidate_facts_max_5(self):
+        """008.4: candidate_facts respects max 5 limit."""
+        extractor, heart, bus, http_client = self._make_extractor()
+        heart.search_facts = AsyncMock(return_value=[])
+        heart.learn = AsyncMock()
+
+        event = _make_event(
+            "episode_summarized",
+            data={
+                "episode_id": str(uuid4()),
+                "summary": {"summary": "Many facts.", "key_points": []},
+                "candidate_facts": [f"Fact number {i}" for i in range(8)],
+            },
+        )
+        await extractor.handle(event)
+
+        http_client.post.assert_not_called()
+        assert heart.learn.call_count == 5  # Max 5
 
 
 # ===========================================================================

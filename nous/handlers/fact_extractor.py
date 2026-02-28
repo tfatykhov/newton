@@ -69,12 +69,25 @@ class FactExtractor:
         bus.on("episode_summarized", self.handle)
 
     async def handle(self, event: Event) -> None:
-        """Handle episode_summarized — extract and store facts."""
+        """Handle episode_summarized — extract and store facts.
+
+        008.4: If candidate_facts present in event data, store them directly
+        without calling the LLM. Falls back to LLM extraction otherwise.
+        """
         summary = event.data.get("summary", {})
         if not summary:
             return
 
         try:
+            # 008.4: Use pre-extracted candidate_facts if available
+            candidate_facts = event.data.get("candidate_facts", [])
+            if candidate_facts:
+                await self._store_candidate_facts(
+                    candidate_facts, event.data.get("episode_id", "?")
+                )
+                return
+
+            # Fallback: LLM extraction (backward compatibility)
             candidates = await self._extract_facts(summary)
             if not candidates:
                 return
@@ -117,6 +130,34 @@ class FactExtractor:
 
         except Exception:
             logger.exception("Fact extraction failed for episode %s", event.data.get("episode_id"))
+
+    async def _store_candidate_facts(self, candidates: list[str], episode_id: str) -> None:
+        """008.4: Store pre-extracted candidate facts directly, with dedup."""
+        stored = 0
+        for fact_text in candidates[:5]:  # Max 5 per episode
+            if not fact_text or not fact_text.strip():
+                continue
+
+            # Dedup against existing facts
+            existing = await self._heart.search_facts(fact_text, limit=1)
+            if existing and existing[0].score is not None and existing[0].score > 0.85:
+                logger.debug("Skipping duplicate candidate fact: %s", fact_text[:50])
+                continue
+
+            fact_input = FactInput(
+                content=fact_text,
+                source="episode_summarizer",
+                confidence=0.8,  # Default confidence for LLM-extracted candidates
+            )
+            await self._heart.learn(fact_input)
+            stored += 1
+
+        if stored:
+            logger.info(
+                "Stored %d candidate facts from episode %s",
+                stored,
+                episode_id,
+            )
 
     async def _extract_facts(self, summary: dict[str, Any]) -> list[dict[str, Any]]:
         """Call LLM to extract facts from episode summary."""
