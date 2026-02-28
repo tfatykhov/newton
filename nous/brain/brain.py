@@ -382,6 +382,50 @@ class Brain:
         return self._decision_to_detail(decision)
 
     # ------------------------------------------------------------------
+    # delete()
+    # ------------------------------------------------------------------
+
+    async def delete(
+        self,
+        decision_id: UUID,
+        session: AsyncSession | None = None,
+    ) -> None:
+        """Delete a decision and its related records (tags, reasons, thoughts).
+
+        Used to clean up deliberation records for non-decisions (informational
+        responses that were pre-registered but turned out not to be decisions).
+        """
+        if session is None:
+            async with self.db.session() as session:
+                await self._delete(decision_id, session)
+                await session.commit()
+                return
+        await self._delete(decision_id, session)
+
+    async def _delete(self, decision_id: UUID, session: AsyncSession) -> None:
+        """Internal delete — cascading removal of decision + related records.
+
+        Most FK references use CASCADE (auto-handled by Postgres).
+        Two NO ACTION FKs need explicit NULL-out: heart.facts.source_decision_id
+        and heart.censors.learned_from_decision.
+        """
+        # NULL-out NO ACTION FK references in heart tables
+        await session.execute(
+            text("UPDATE heart.facts SET source_decision_id = NULL WHERE source_decision_id = :did"),
+            {"did": decision_id},
+        )
+        await session.execute(
+            text("UPDATE heart.censors SET learned_from_decision = NULL WHERE learned_from_decision = :did"),
+            {"did": decision_id},
+        )
+        # Delete the decision — CASCADE handles brain.thoughts, decision_tags,
+        # decision_reasons, decision_bridge, graph_edges, episode_decisions
+        await session.execute(
+            text("DELETE FROM brain.decisions WHERE id = :did"),
+            {"did": decision_id},
+        )
+
+    # ------------------------------------------------------------------
     # think()
     # ------------------------------------------------------------------
 

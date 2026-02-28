@@ -109,28 +109,18 @@ class DeliberationEngine:
             session=session,
         )
 
-    async def abandon(
+    async def delete(
         self,
         decision_id: str,
         session: AsyncSession | None = None,
     ) -> None:
-        """Abandon a deliberation -- mark as non-decision (006.2).
+        """Delete a deliberation record for non-decisions.
 
-        Sets confidence to 0.0 and reviews as failure/abandoned so the
-        "Plan: ..." record doesn't pollute future context recall.
+        Informational responses shouldn't create decision records at all.
+        Instead of marking as failure (which pollutes Brain with noise),
+        remove the record entirely.
         """
-        await self._brain.update(
-            decision_id=UUID(decision_id),
-            description="[abandoned — informational response]",
-            confidence=0.0,
-            session=session,
-        )
-        await self._brain.review(
-            decision_id=UUID(decision_id),
-            outcome="failure",
-            result="Abandoned: response was informational, not a decision.",
-            session=session,
-        )
+        await self._brain.delete(UUID(decision_id), session=session)
 
     async def should_deliberate(self, frame: FrameSelection) -> bool:
         """Should this frame trigger deliberation?

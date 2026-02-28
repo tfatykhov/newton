@@ -135,6 +135,7 @@ class TurnResult(BaseModel):
     tool_results: list[ToolResult] = Field(default_factory=list)
     error: str | None = None
     duration_ms: int | None = None
+    thinking_blocks: list[str] = Field(default_factory=list)
 
 
 class Assessment(BaseModel):
