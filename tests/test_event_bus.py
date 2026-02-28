@@ -250,7 +250,7 @@ class TestEventBus:
 
 
 # ===========================================================================
-# TestEpisodeSummarizer — 6 tests
+# TestEpisodeSummarizer — 7 tests
 # ===========================================================================
 
 
@@ -418,6 +418,48 @@ class TestEpisodeSummarizer:
         # The prompt sent to LLM should contain truncation marker
         assert len(captured_prompts) == 1
         assert "[... middle truncated ...]" in captured_prompts[0]
+
+    @pytest.mark.asyncio
+    async def test_summary_includes_new_fields(self):
+        """008.4: Summary includes outcome_rationale and candidate_facts."""
+        summary_json = {
+            "title": "Architecture Discussion",
+            "summary": "Discussed project architecture and chose PostgreSQL.",
+            "key_points": ["PostgreSQL chosen for pgvector support and unified storage"],
+            "outcome": "resolved",
+            "outcome_rationale": "User's question was fully answered with a concrete decision",
+            "topics": ["architecture", "database"],
+            "candidate_facts": ["Project uses PostgreSQL 17 with pgvector for embeddings"],
+        }
+        summarizer, heart, bus, http_client = self._make_summarizer()
+        heart.get_episode = AsyncMock(
+            return_value=MagicMock(summary="opening", structured_summary=None)
+        )
+        heart.update_episode_summary = AsyncMock()
+        http_client.post = AsyncMock(
+            return_value=_mock_httpx_response(200, _llm_response(json.dumps(summary_json)))
+        )
+
+        episode_id = str(uuid4())
+        event = _make_event(
+            "session_ended",
+            data={
+                "episode_id": episode_id,
+                "transcript": "User: What database should we use?\n\nAssistant: I recommend PostgreSQL with pgvector." * 3,
+            },
+        )
+        await summarizer.handle(event)
+
+        # Verify summary stored with new fields
+        heart.update_episode_summary.assert_called_once()
+        stored_summary = heart.update_episode_summary.call_args[0][1]
+        assert stored_summary["outcome_rationale"] == "User's question was fully answered with a concrete decision"
+        assert stored_summary["candidate_facts"] == ["Project uses PostgreSQL 17 with pgvector for embeddings"]
+
+        # Verify candidate_facts passed through in emitted event
+        bus.emit.assert_called_once()
+        emitted = bus.emit.call_args[0][0]
+        assert emitted.data["candidate_facts"] == ["Project uses PostgreSQL 17 with pgvector for embeddings"]
 
 
 # ===========================================================================
