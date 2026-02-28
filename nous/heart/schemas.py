@@ -54,6 +54,7 @@ class EpisodeDetail(BaseModel):
     lessons_learned: list[str]
     tags: list[str]
     decision_ids: list[UUID]  # From episode_decisions join
+    active: bool = True
     structured_summary: dict | None = None
     user_id: str | None = None
     user_display_name: str | None = None
