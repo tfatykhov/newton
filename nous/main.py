@@ -141,6 +141,14 @@ async def create_components(settings: Settings) -> dict:
         except ImportError:
             logger.debug("SleepHandler not available yet")
 
+        try:
+            from nous.handlers.decision_reviewer import DecisionReviewer
+
+            if settings.decision_review_enabled:
+                DecisionReviewer(brain, settings, bus, handler_http)
+        except ImportError:
+            logger.debug("DecisionReviewer not available yet")
+
         # Start bus + monitor
         await bus.start()
         if session_monitor:
