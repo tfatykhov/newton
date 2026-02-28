@@ -72,6 +72,7 @@ class ContextEngine:
         retrieval_plan: RetrievalPlan | None = None,
         usage_tracker: UsageTracker | None = None,
         identity_override: str | None = None,
+        temporal_boost: bool = False,  # 008.6
     ) -> BuildResult:
         """Build system prompt + context sections within budget.
 
@@ -360,8 +361,10 @@ class ContextEngine:
                 logger.warning("Heart.search_procedures failed during context build: %s", e)
 
         # 7.5 Temporal awareness — always include recent episode titles (008.6)
+        # Not gated by budget.episodes — this is a lightweight tier that shows
+        # only titles (+ summaries when boosted), separate from heavy semantic retrieval
         _temporal_episode_ids: set[str] = set()
-        if self._settings.temporal_context_enabled and budget.episodes > 0:
+        if self._settings.temporal_context_enabled:
             try:
                 recent = await self._heart.list_episodes(limit=5, hours=48)
                 if recent:
@@ -371,6 +374,9 @@ class ContextEngine:
                         title = e.title or (e.summary[:60] if e.summary else "Untitled")
                         time_str = e.started_at.strftime("%b %d %H:%M")
                         recent_lines.append(f"- [{time_str}] {title}")
+                        # 008.6: Include summaries when temporal boost is active
+                        if temporal_boost and e.summary and e.summary != e.title:
+                            recent_lines.append(f"  {e.summary[:200]}")
                     recent_text = "\n".join(recent_lines)
                     sections.append(
                         ContextSection(

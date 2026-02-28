@@ -217,6 +217,9 @@ class CognitiveLayer:
         signals = self._intent_classifier.classify(user_input, frame)
         plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
+        # 008.6: Detect recap queries and set temporal boost
+        _temporal_boost = _is_recap_query(user_input) or signals.temporal_recency > 0.5
+
         # 3. RECALL — build context (or initiation prompt)
         system_prompt = ""
         if _is_initiation:
@@ -254,6 +257,7 @@ class CognitiveLayer:
                     retrieval_plan=plan,
                     usage_tracker=self._usage_tracker,
                     identity_override=_identity_override,
+                    temporal_boost=_temporal_boost,  # 008.6
                 )
                 system_prompt = build_result.system_prompt
                 context_token_estimate = sum(s.token_estimate for s in build_result.sections)

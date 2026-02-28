@@ -204,4 +204,14 @@ class IntentClassifier:
         elif signals.frame_type == "decision":
             plan.budget_overrides = {"decisions": 3500, "procedures": 2000}
 
+        # 008.6: Temporal recency boost — ensure episodes are retrieved
+        if signals.temporal_recency > 0.5:
+            current_ep_budget = plan.budget_overrides.get("episodes", None)
+            if current_ep_budget is not None and current_ep_budget == 0:
+                plan.budget_overrides["episodes"] = 1000
+            # Boost episode query limit
+            for q in plan.queries:
+                if q.memory_type == "episode":
+                    q.limit = max(q.limit, 8)
+
         return plan

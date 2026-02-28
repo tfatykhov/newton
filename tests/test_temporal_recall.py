@@ -508,3 +508,126 @@ class TestRecapDetection:
     def test_non_recap_not_detected(self, query):
         from nous.cognitive.layer import _is_recap_query
         assert _is_recap_query(query) is False
+
+
+# ---------------------------------------------------------------------------
+# TestTemporalRecencyWiring (Phase 4, Task 6)
+# ---------------------------------------------------------------------------
+
+
+class TestTemporalRecencyWiring:
+    def test_plan_retrieval_boosts_episodes_on_high_recency(self):
+        from nous.cognitive.intent import IntentClassifier
+        from nous.cognitive.schemas import FrameSelection
+
+        classifier = IntentClassifier()
+        frame = FrameSelection(
+            frame_id="conversation", frame_name="Conversation",
+            confidence=1.0, match_method="pattern",
+        )
+        signals = classifier.classify("what did we talk about recently", frame)
+        assert signals.temporal_recency > 0.5
+
+        plan = classifier.plan_retrieval(signals, input_text="what did we talk about recently")
+        # Conversation frame normally has episodes=0, but temporal boost should override
+        assert plan.budget_overrides.get("episodes", 0) > 0
+
+
+# ---------------------------------------------------------------------------
+# TestBudgetBoost (Phase 4, Task 6)
+# ---------------------------------------------------------------------------
+
+
+class TestBudgetBoost:
+    @pytest.fixture
+    def mock_heart(self):
+        from unittest.mock import AsyncMock, MagicMock
+        heart = MagicMock()
+        heart.list_episodes = AsyncMock(return_value=[])
+        heart.search_episodes = AsyncMock(return_value=[])
+        heart.search_facts = AsyncMock(return_value=[])
+        heart.search_procedures = AsyncMock(return_value=[])
+        heart.search_censors = AsyncMock(return_value=[])
+        heart.list_censors = AsyncMock(return_value=[])
+        heart.list_facts_by_category = AsyncMock(return_value=[])
+        heart.get_facts_by_categories = AsyncMock(return_value=[])
+        heart.get_working_memory = AsyncMock(return_value=None)
+        return heart
+
+    @pytest.fixture
+    def mock_brain(self):
+        from unittest.mock import AsyncMock, MagicMock
+        brain = MagicMock()
+        brain.query = AsyncMock(return_value=[])
+        brain.embeddings = None
+        return brain
+
+    @pytest.fixture
+    def settings(self):
+        from unittest.mock import MagicMock
+        s = MagicMock()
+        s.temporal_context_enabled = True
+        return s
+
+    @pytest.fixture
+    def frame(self):
+        from nous.cognitive.schemas import FrameSelection
+        return FrameSelection(
+            frame_id="conversation", frame_name="Conversation",
+            confidence=1.0, match_method="pattern",
+        )
+
+    @pytest.mark.asyncio
+    async def test_temporal_boost_includes_summaries(self, mock_heart, mock_brain, settings, frame):
+        from unittest.mock import AsyncMock
+        from nous.cognitive.context import ContextEngine
+
+        episodes = [
+            EpisodeSummary(
+                id=uuid4(), title="Ski Trip Planning",
+                summary="Discussed budget and dates for Breckenridge ski trip in March 2026",
+                outcome="success",
+                started_at=datetime.now(UTC) - timedelta(hours=1), tags=["travel"],
+            ),
+        ]
+        mock_heart.list_episodes = AsyncMock(return_value=episodes)
+
+        engine = ContextEngine(mock_brain, mock_heart, settings)
+        result = await engine.build(
+            "test-agent", "session-1", "what did we talk about", frame,
+            temporal_boost=True,
+        )
+
+        section_labels = [s.label for s in result.sections]
+        assert "Recent Conversations" in section_labels
+
+        recent_section = next(s for s in result.sections if s.label == "Recent Conversations")
+        # With boost, summaries should be included
+        assert "Discussed budget" in recent_section.content
+
+    @pytest.mark.asyncio
+    async def test_no_boost_excludes_summaries(self, mock_heart, mock_brain, settings, frame):
+        from unittest.mock import AsyncMock
+        from nous.cognitive.context import ContextEngine
+
+        episodes = [
+            EpisodeSummary(
+                id=uuid4(), title="Ski Trip Planning",
+                summary="Discussed budget and dates for Breckenridge ski trip in March 2026",
+                outcome="success",
+                started_at=datetime.now(UTC) - timedelta(hours=1), tags=["travel"],
+            ),
+        ]
+        mock_heart.list_episodes = AsyncMock(return_value=episodes)
+
+        engine = ContextEngine(mock_brain, mock_heart, settings)
+        result = await engine.build(
+            "test-agent", "session-1", "hello", frame,
+            temporal_boost=False,
+        )
+
+        section_labels = [s.label for s in result.sections]
+        if "Recent Conversations" in section_labels:
+            recent_section = next(s for s in result.sections if s.label == "Recent Conversations")
+            # Without boost, summaries should NOT be included
+            assert "Discussed budget" not in recent_section.content
