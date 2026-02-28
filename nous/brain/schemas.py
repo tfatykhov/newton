@@ -46,6 +46,7 @@ class RecordInput(BaseModel):
     pattern: str | None = None
     tags: list[str] = []
     reasons: list[ReasonInput] = []
+    session_id: str | None = None
 
 
 class ReviewInput(BaseModel):
@@ -53,6 +54,7 @@ class ReviewInput(BaseModel):
 
     outcome: Literal["success", "partial", "failure"]
     result: str | None = None
+    reviewer: str | None = None
 
 
 class BridgeInfo(BaseModel):
@@ -100,6 +102,7 @@ class DecisionDetail(BaseModel):
     outcome: OutcomeType
     outcome_result: str | None = None
     reviewed_at: datetime | None = None
+    reviewer: str | None = None
     created_at: datetime
     updated_at: datetime
     tags: list[str] = []
