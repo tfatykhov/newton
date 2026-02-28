@@ -1,8 +1,8 @@
 """Tests for 006 Event Bus — EventBus core, handlers, transcript, user tagging.
 
-47 test cases across 8 test classes:
+48 test cases across 8 test classes:
 - TestEventBus (8): Core bus mechanics
-- TestEpisodeSummarizer (6): Episode summary handler
+- TestEpisodeSummarizer (7): Episode summary handler
 - TestFactExtractor (8): Fact extraction handler (#45: +2 for threshold change)
 - TestTranscriptCapture (3): Transcript accumulation in SessionMetadata
 - TestUserTagging (3): F010.5 user-tagged episodes
