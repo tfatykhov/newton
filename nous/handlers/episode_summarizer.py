@@ -133,10 +133,7 @@ class EpisodeSummarizer:
             logger.warning("No HTTP client for episode summarizer")
             return None
 
-        # Truncate transcript to ~8000 chars
-        if len(transcript) > 8000:
-            half = 3800
-            transcript = transcript[:half] + "\n\n[... middle truncated ...]\n\n" + transcript[-half:]
+        transcript = self._truncate_transcript(transcript)
 
         prompt = _SUMMARY_PROMPT.format(transcript=transcript, decision_context="")
         headers = build_anthropic_headers(self._settings)
@@ -165,3 +162,60 @@ class EpisodeSummarizer:
         except (json.JSONDecodeError, httpx.TimeoutException) as e:
             logger.warning("Summary generation failed: %s", e)
             return None
+
+    def _truncate_transcript(self, transcript: str, max_chars: int = 8000) -> str:
+        """008.4: Truncate transcript preserving high-value turns.
+
+        Scores turns by information density: decision language and user turns
+        score higher, long tool outputs score lower. Always keeps first and
+        last turns. Fills middle by score within budget.
+        """
+        if len(transcript) <= max_chars:
+            return transcript
+
+        turns = transcript.split("\n\n")
+        if len(turns) <= 2:
+            return transcript[:max_chars]
+
+        # Score each turn by information density
+        scored: list[tuple[float, int, str]] = []
+        for i, turn in enumerate(turns):
+            score = 1.0
+            lower = turn.lower()
+            # Boost: decision language, conclusions
+            if any(w in lower for w in ["decided", "chose", "because", "learned", "conclusion", "chosen"]):
+                score += 2.0
+            # Boost: user turns (directives, questions)
+            if lower.startswith("user:") or lower.startswith("human:"):
+                score += 1.0
+            # Penalize: long tool outputs, raw data
+            if len(turn) > 500 and ("```" in turn or turn.count("\n") > 10):
+                score -= 1.0
+            scored.append((score, i, turn))
+
+        # Always keep first and last turns
+        first = turns[0]
+        last = turns[-1]
+        budget = max_chars - len(first) - len(last) - 50  # buffer for separators
+
+        if budget <= 0:
+            return first[:max_chars // 2] + "\n\n" + last[:max_chars // 2]
+
+        # Sort middle turns by score (descending), break ties by original order
+        middle = sorted(scored[1:-1], key=lambda x: (-x[0], x[1]))
+        kept_indices: set[int] = set()
+        used = 0
+        for score, idx, turn in middle:
+            if used + len(turn) > budget:
+                continue
+            kept_indices.add(idx)
+            used += len(turn)
+
+        # Reconstruct in original order
+        result = [first]
+        for score, idx, turn in scored[1:-1]:
+            if idx in kept_indices:
+                result.append(turn)
+        result.append(last)
+
+        return "\n\n".join(result)

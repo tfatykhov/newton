@@ -408,16 +408,17 @@ class TestEpisodeSummarizer:
 
         http_client.post = capture_post
 
-        long_transcript = "x" * 10000  # Well over 8000
+        # Use turns separated by \n\n so truncation can split them
+        long_transcript = "\n\n".join([f"User: Turn {i} " + "x" * 400 for i in range(30)])
         event = _make_event(
             "session_ended",
             data={"episode_id": str(uuid4()), "transcript": long_transcript},
         )
         await summarizer.handle(event)
 
-        # The prompt sent to LLM should contain truncation marker
+        # The prompt sent to LLM should be truncated (shorter than original)
         assert len(captured_prompts) == 1
-        assert "[... middle truncated ...]" in captured_prompts[0]
+        assert len(captured_prompts[0]) < len(long_transcript)
 
     @pytest.mark.asyncio
     async def test_summary_includes_new_fields(self):
@@ -460,6 +461,39 @@ class TestEpisodeSummarizer:
         bus.emit.assert_called_once()
         emitted = bus.emit.call_args[0][0]
         assert emitted.data["candidate_facts"] == ["Project uses PostgreSQL 17 with pgvector for embeddings"]
+
+    @pytest.mark.asyncio
+    async def test_truncate_noop_under_limit(self):
+        """008.4: Short transcript returned unchanged."""
+        summarizer, _, _, _ = self._make_summarizer()
+        short = "User: Hello\n\nAssistant: Hi there"
+        result = summarizer._truncate_transcript(short)
+        assert result == short
+
+    @pytest.mark.asyncio
+    async def test_truncate_preserves_first_last(self):
+        """008.4: First and last turns always kept."""
+        summarizer, _, _, _ = self._make_summarizer()
+        turns = ["User: First turn"] + [f"Assistant: Middle turn {i} " + "x" * 500 for i in range(20)] + ["User: Last turn"]
+        transcript = "\n\n".join(turns)
+        result = summarizer._truncate_transcript(transcript, max_chars=2000)
+        assert result.startswith("User: First turn")
+        assert result.endswith("User: Last turn")
+
+    @pytest.mark.asyncio
+    async def test_truncate_prioritizes_decisions(self):
+        """008.4: Decision turns kept over tool output."""
+        summarizer, _, _, _ = self._make_summarizer()
+        decision_turn = "Assistant: We decided to use PostgreSQL because it supports pgvector natively."
+        tool_turn = "Tool output:\n```\n" + "x" * 600 + "\n```"
+        filler = "Assistant: " + "y" * 400
+
+        turns = ["User: Start"] + [tool_turn] * 5 + [decision_turn] + [filler] * 5 + ["User: End"]
+        transcript = "\n\n".join(turns)
+        result = summarizer._truncate_transcript(transcript, max_chars=3000)
+
+        # Decision turn should be preserved
+        assert "decided to use PostgreSQL" in result
 
 
 # ===========================================================================
