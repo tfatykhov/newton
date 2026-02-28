@@ -16,7 +16,6 @@ import pytest
 from nous.heart.schemas import EpisodeSummary
 from nous.storage.models import Episode as EpisodeORM
 
-pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +488,7 @@ class TestRecapDetection:
         "catch me up",
         "recap",
         "give me a recap of recent conversations",
-        "what happened today",
+        "what happened recently",
         "summary of recent discussions",
         "what did we do yesterday",
     ])

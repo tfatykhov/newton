@@ -23,7 +23,7 @@ from nous.cognitive.context import ContextEngine
 from nous.cognitive.dedup import ConversationDeduplicator
 from nous.cognitive.deliberation import DeliberationEngine
 from nous.cognitive.frames import FrameEngine
-from nous.cognitive.intent import IntentClassifier
+from nous.cognitive.intent import IntentClassifier, IntentSignals
 from nous.cognitive.monitor import MonitorEngine
 from nous.cognitive.schemas import Assessment, SessionMetadata, TurnContext, TurnResult
 from nous.cognitive.usage_tracker import UsageTracker
@@ -50,7 +50,8 @@ _RECAP_PATTERNS = frozenset({
     "what did we do",
     "recent conversations",
     "catch me up",
-    "what happened",
+    "what happened recently",
+    "what happened lately",
     "recap",
     "summary of recent",
 })
@@ -222,7 +223,16 @@ class CognitiveLayer:
         _temporal_boost = _is_recap or signals.temporal_recency > 0.5
         # 008.6: Ensure budget boost fires even for bare recap queries without temporal words
         if _is_recap and signals.temporal_recency <= 0.5:
-            signals.temporal_recency = 0.8
+            _effective_recency = 0.8
+            signals = IntentSignals(
+                frame_type=signals.frame_type,
+                entity_mentions=signals.entity_mentions,
+                temporal_recency=_effective_recency,
+                memory_type_hints=signals.memory_type_hints,
+                is_question=signals.is_question,
+                is_greeting=signals.is_greeting,
+                topic_keywords=signals.topic_keywords,
+            )
             plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
         # 3. RECALL — build context (or initiation prompt)
