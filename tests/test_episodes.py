@@ -221,3 +221,89 @@ async def test_search_episodes(heart, session):
     # With mock embeddings, identical text should match
     if results:
         assert any("PostgreSQL" in r.summary or "migration" in (r.title or "") for r in results)
+
+
+# ---------------------------------------------------------------------------
+# 8. test_update_summary_backfills_columns (008.3)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_summary_backfills_columns(heart, session):
+    """008.3: update_summary should backfill title, summary, lessons_learned."""
+    inp = _episode_input(title=None, summary="hey what is the weather")
+    detail = await heart.start_episode(inp, session=session)
+    assert detail.title is None
+    assert detail.summary == "hey what is the weather"
+
+    structured = {
+        "title": "Weather Check and Project Discussion",
+        "summary": "Tim asked about weather, then discussed project architecture.",
+        "key_points": ["Weather was 12C and sunny", "Decided on Astro framework"],
+        "topics": ["weather", "architecture"],
+        "outcome": "resolved",
+    }
+    await heart.update_episode_summary(detail.id, structured, session=session)
+
+    # Re-fetch and verify backfill
+    updated = await heart.get_episode(detail.id, session=session)
+    assert updated.title == "Weather Check and Project Discussion"
+    assert updated.summary == "Tim asked about weather, then discussed project architecture."
+    assert updated.lessons_learned == ["Weather was 12C and sunny", "Decided on Astro framework"]
+    assert updated.structured_summary == structured
+
+
+# ---------------------------------------------------------------------------
+# 9. test_update_summary_partial_data (008.3)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_summary_partial_data(heart, session):
+    """008.3: Gracefully handle structured summary with missing fields."""
+    inp = _episode_input(summary="test input")
+    detail = await heart.start_episode(inp, session=session)
+
+    # Summary with only title, no key_points
+    structured = {"title": "Quick Chat", "topics": ["misc"]}
+    await heart.update_episode_summary(detail.id, structured, session=session)
+
+    updated = await heart.get_episode(detail.id, session=session)
+    assert updated.title == "Quick Chat"
+    assert updated.summary == "test input"  # Not overwritten — no "summary" in structured
+    assert updated.lessons_learned is None  # Not set — no "key_points"
+
+
+# ---------------------------------------------------------------------------
+# 10. test_end_sets_active_false (008.3)
+# ---------------------------------------------------------------------------
+
+
+async def test_end_sets_active_false(heart, session):
+    """008.3: Ending an episode should set active=false."""
+    inp = _episode_input()
+    detail = await heart.start_episode(inp, session=session)
+    assert detail.active is True
+
+    ended = await heart.end_episode(detail.id, outcome="success", session=session)
+    assert ended.active is False
+    assert ended.outcome == "success"
+    assert ended.ended_at is not None
+
+
+# ---------------------------------------------------------------------------
+# 11. test_end_with_lessons_and_active_flag (008.3)
+# ---------------------------------------------------------------------------
+
+
+async def test_end_with_lessons_and_active_flag(heart, session):
+    """008.3: End with lessons_learned also sets active=false."""
+    inp = _episode_input()
+    detail = await heart.start_episode(inp, session=session)
+
+    ended = await heart.end_episode(
+        detail.id,
+        outcome="success",
+        lessons_learned=["Always check DB state first"],
+        session=session,
+    )
+    assert ended.active is False
+    assert ended.lessons_learned == ["Always check DB state first"]

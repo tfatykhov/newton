@@ -138,6 +138,25 @@ class EpisodeManager:
         episode = result.scalar_one_or_none()
         if episode:
             episode.structured_summary = summary
+
+            # 008.3: Backfill text columns from structured summary
+            if isinstance(summary, dict):
+                if summary.get("title"):
+                    episode.title = summary["title"]
+                if summary.get("summary"):
+                    episode.summary = summary["summary"]
+                if summary.get("key_points"):
+                    episode.lessons_learned = summary["key_points"]
+
+            # 008.3: Refresh embedding with real content
+            if self.embeddings:
+                embed_text = f"{episode.title or ''} {episode.summary or ''}".strip()
+                if embed_text:
+                    try:
+                        episode.embedding = await self.embeddings.embed(embed_text)
+                    except Exception:
+                        logger.debug("Failed to refresh episode embedding after summary")
+
             await session.flush()
 
     # ------------------------------------------------------------------
@@ -178,6 +197,7 @@ class EpisodeManager:
         episode.outcome = outcome
         episode.lessons_learned = lessons_learned
         episode.surprise_level = surprise_level
+        episode.active = False  # 008.3: Mark episode as inactive on close
 
         # P3-7: Regenerate embedding incorporating outcome + lessons
         if self.embeddings:
