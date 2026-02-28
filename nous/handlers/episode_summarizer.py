@@ -23,19 +23,44 @@ from nous.heart.heart import Heart
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_PROMPT = """Given the following conversation transcript, generate a structured summary.
+_SUMMARY_PROMPT = """You are summarizing a conversation episode for an AI agent's long-term memory.
+
+Context:
+- Agent: Nous (cognitive agent framework)
+- This summary will be used for: semantic search recall, context assembly, calibration
 
 Transcript:
 {transcript}
 
+{decision_context}
+
 Return ONLY valid JSON (no markdown, no explanation):
 {{
-  "title": "<5-10 word descriptive title>",
-  "summary": "<100-150 word prose summary of what happened>",
-  "key_points": ["<point 1>", "<point 2>", "<point 3>"],
+  "title": "<5-10 word descriptive title focusing on WHAT WAS ACCOMPLISHED>",
+  "summary": "<100-150 word prose summary emphasizing decisions made, problems solved, and outcomes>",
+  "key_points": [
+    "<lesson or reusable knowledge, not just event description>",
+    "<pattern or insight that would help in similar future situations>"
+  ],
   "outcome": "<resolved|partial|unresolved|informational>",
-  "topics": ["<topic1>", "<topic2>"]
-}}"""
+  "outcome_rationale": "<1 sentence explaining why this outcome classification>",
+  "topics": ["<topic1>", "<topic2>"],
+  "candidate_facts": [
+    "<factual statement worth storing as long-term knowledge>"
+  ]
+}}
+
+Outcome guidelines:
+- resolved: The user's request was fully addressed, task completed, question answered
+- partial: Work started but not finished, or only some requests addressed
+- unresolved: Failed to complete the task, hit blockers
+- informational: Casual chat, status check, no actionable work done
+
+For key_points: Focus on WHAT WAS LEARNED, not what happened. Ask yourself:
+"If this agent faces a similar situation, what from this episode would help?"
+
+For candidate_facts: Extract concrete, reusable knowledge (tool configs, preferences,
+architectural decisions, API behaviors) that should persist as standalone facts."""
 
 
 class EpisodeSummarizer:
@@ -93,6 +118,7 @@ class EpisodeSummarizer:
                 data={
                     "episode_id": episode_id,
                     "summary": summary,
+                    "candidate_facts": summary.get("candidate_facts", []),
                 },
             ))
 
@@ -112,7 +138,7 @@ class EpisodeSummarizer:
             half = 3800
             transcript = transcript[:half] + "\n\n[... middle truncated ...]\n\n" + transcript[-half:]
 
-        prompt = _SUMMARY_PROMPT.format(transcript=transcript)
+        prompt = _SUMMARY_PROMPT.format(transcript=transcript, decision_context="")
         headers = build_anthropic_headers(self._settings)
 
         try:
@@ -120,7 +146,7 @@ class EpisodeSummarizer:
                 f"{self._settings.api_base_url}/v1/messages",
                 json={
                     "model": self._settings.background_model,
-                    "max_tokens": 500,
+                    "max_tokens": 800,
                     "messages": [{"role": "user", "content": prompt}],
                 },
                 headers=headers,
