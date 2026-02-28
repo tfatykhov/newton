@@ -64,7 +64,7 @@ All shipped implementation specs with PR references:
 | 008.2 | Topic-Aware Recall v2 | 📋 Specced | — full spec deferred; spike merged |
 | 008.3 | Episode Summary Backfill & Lifecycle | ✅ Shipped | #79 — backfill unsummarized episodes, active flag lifecycle |
 | 008.4 | Episode Summary Quality | ✅ Shipped | — enhanced prompt, candidate_facts, smart truncation, decision context |
-| 008.5 | Decision Review Loop | 🏗️ In Progress | — auto-review signals, REST endpoints, calibration |
+| 008.5 | Decision Review Loop | ✅ Shipped | #81 — auto-review signals, REST endpoints, calibration snapshots |
 | 009.1-009.4 | Memory Lifecycle Implementation | 📦 Shelved | — system too young (53 facts, 86 episodes at time of assessment) |
 | 010.1 | Health Dashboard (F007 Phase 1) | 📋 Specced | — enrich GET /status |
 | — | Streaming Keepalive + Tool Timeout | ✅ Shipped | #73 — keepalive during Anthropic wait, `NOUS_TOOL_TIMEOUT` |
