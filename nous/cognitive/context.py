@@ -359,12 +359,39 @@ class ContextEngine:
             except Exception as e:
                 logger.warning("Heart.search_procedures failed during context build: %s", e)
 
+        # 7.5 Temporal awareness — always include recent episode titles (008.6)
+        _temporal_episode_ids: set[str] = set()
+        if self._settings.temporal_context_enabled and budget.episodes > 0:
+            try:
+                recent = await self._heart.list_episodes(limit=5, hours=48)
+                if recent:
+                    _temporal_episode_ids = {str(e.id) for e in recent}
+                    recent_lines = []
+                    for e in recent:
+                        title = e.title or (e.summary[:60] if e.summary else "Untitled")
+                        time_str = e.started_at.strftime("%b %d %H:%M")
+                        recent_lines.append(f"- [{time_str}] {title}")
+                    recent_text = "\n".join(recent_lines)
+                    sections.append(
+                        ContextSection(
+                            priority=7,
+                            label="Recent Conversations",
+                            content=recent_text,
+                            token_estimate=self._estimate_tokens(recent_text),
+                        )
+                    )
+            except Exception as e:
+                logger.warning("Temporal tier failed: %s", e)
+
         # 8. Episodes
         if budget.episodes > 0 and "episode" not in skip_types:
             try:
                 limit = _limits.get("episode", 5)
                 q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
+                # 008.6: Exclude episodes already shown in temporal tier
+                if _temporal_episode_ids:
+                    episodes = [e for e in episodes if str(e.id) not in _temporal_episode_ids]
                 if episodes and self._has_embeddings:
                     # Tier 3: min_score threshold (only with embeddings)
                     episodes = [e for e in episodes if (getattr(e, "score", None) or 0) >= TIER3_THRESHOLDS["episode"]]

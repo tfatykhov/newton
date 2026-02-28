@@ -241,15 +241,19 @@ class TestTemporalContextTier:
 
     @pytest.fixture
     def settings(self):
-        from nous.config import Settings
+        from unittest.mock import MagicMock
 
-        return Settings(**{"ANTHROPIC_API_KEY": "test", "NOUS_TEMPORAL_CONTEXT_ENABLED": "true"})
+        s = MagicMock()
+        s.temporal_context_enabled = True
+        return s
 
     @pytest.fixture
     def settings_disabled(self):
-        from nous.config import Settings
+        from unittest.mock import MagicMock
 
-        return Settings(**{"ANTHROPIC_API_KEY": "test", "NOUS_TEMPORAL_CONTEXT_ENABLED": "false"})
+        s = MagicMock()
+        s.temporal_context_enabled = False
+        return s
 
     @pytest.fixture
     def frame(self):
