@@ -346,7 +346,7 @@ class AgentRunner:
                                     _agent_id, session_id, conversation
                                 )
 
-            response_text, tool_results, usage = await self._tool_loop(
+            response_text, tool_results, usage, thinking_blocks = await self._tool_loop(
                 system_prompt=system_prompt,
                 conversation=conversation,
                 frame_id=turn_context.frame.frame_id,
@@ -355,6 +355,7 @@ class AgentRunner:
         except Exception as e:
             logger.error("API call error: %s", e)
             error = str(e)
+            thinking_blocks = []
             response_text = "I encountered an error processing your request. Please try again."
             conversation.messages.append(Message(role="assistant", content=response_text))
 
@@ -363,6 +364,7 @@ class AgentRunner:
             response_text=response_text,
             tool_results=tool_results,
             error=error,
+            thinking_blocks=thinking_blocks,
         )
         await self._cognitive.post_turn(_agent_id, session_id, turn_result, turn_context)
 
@@ -656,6 +658,7 @@ class AgentRunner:
                             messages = self._format_messages(conversation)
 
         all_tool_results: list[ToolResult] = []
+        all_thinking_blocks: list[str] = []  # Accumulated across all tool loop iterations
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         response_text = ""
         error = None
@@ -760,7 +763,14 @@ class AgentRunner:
                             total_usage["input_tokens"] += event.usage.get("input_tokens", 0)
                             total_usage["output_tokens"] += event.usage.get("output_tokens", 0)
 
-                # Stream segment ended -- decide next action
+                # Stream segment ended -- collect thinking blocks from this iteration
+                for idx in sorted(all_blocks):
+                    block = all_blocks[idx]
+                    if block["type"] == "thinking":
+                        thinking_text = "".join(block["thinking_parts"]).strip()
+                        if thinking_text:
+                            all_thinking_blocks.append(thinking_text)
+
                 if stop_reason == "end_turn" or not tool_calls:
                     response_text = "".join(text_parts)
                     break
@@ -859,6 +869,7 @@ class AgentRunner:
                 response_text=response_text,
                 tool_results=all_tool_results,
                 error=error,
+                thinking_blocks=all_thinking_blocks,
             )
             await self._cognitive.post_turn(_agent_id, session_id, turn_result, turn_context)
             self._check_safety_net(turn_context, all_tool_results)
@@ -880,10 +891,10 @@ class AgentRunner:
         system_prompt: str,
         conversation: Conversation,
         frame_id: str,
-    ) -> tuple[str, list[ToolResult], dict[str, int]]:
+    ) -> tuple[str, list[ToolResult], dict[str, int], list[str]]:
         """Run the tool use loop until completion or max_turns.
 
-        Returns (response_text, tool_results, usage).
+        Returns (response_text, tool_results, usage, thinking_blocks).
 
         The loop:
         1. Build messages array from conversation
@@ -903,6 +914,7 @@ class AgentRunner:
         messages = self._format_messages(conversation)
 
         all_tool_results: list[ToolResult] = []
+        all_thinking_blocks: list[str] = []  # Accumulated across iterations
         total_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         turns = 0
         max_turns = self._settings.max_turns
@@ -924,10 +936,17 @@ class AgentRunner:
                         input_chars, api_response.usage.get("input_tokens", 0)
                     )
 
+            # Extract thinking blocks from this iteration
+            for block in api_response.content:
+                if isinstance(block, dict) and block.get("type") == "thinking":
+                    thinking_text = block.get("thinking", "").strip()
+                    if thinking_text:
+                        all_thinking_blocks.append(thinking_text)
+
             # If not a tool use, we're done
             if api_response.stop_reason != "tool_use":
                 response_text = self._extract_text(api_response.content)
-                return response_text, all_tool_results, total_usage
+                return response_text, all_tool_results, total_usage, all_thinking_blocks
 
             # P0-3: Append FULL assistant response (all content blocks)
             messages.append({
@@ -989,9 +1008,9 @@ class AgentRunner:
             if final_response.usage:
                 total_usage["input_tokens"] += final_response.usage.get("input_tokens", 0)
                 total_usage["output_tokens"] += final_response.usage.get("output_tokens", 0)
-            return self._extract_text(final_response.content), all_tool_results, total_usage
+            return self._extract_text(final_response.content), all_tool_results, total_usage, all_thinking_blocks
         except Exception:
-            return "I reached the maximum number of tool iterations. Please try again.", all_tool_results, total_usage
+            return "I reached the maximum number of tool iterations. Please try again.", all_tool_results, total_usage, all_thinking_blocks
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -364,14 +364,30 @@ class CognitiveLayer:
         # 3. DELIBERATION — finalize if decision exists
         if decision_id:
             if self._is_informational(turn_result):
-                # 006.2: Abandon orphaned deliberation for informational responses
-                logger.debug("Abandoning deliberation %s: informational response", decision_id)
+                # 006.2: Delete orphaned deliberation for informational responses
+                # (no value in keeping "[abandoned — informational response]" records)
+                logger.debug("Deleting deliberation %s: informational response", decision_id)
                 try:
-                    await self._deliberation.abandon(decision_id, session=session)
+                    await self._deliberation.delete(decision_id, session=session)
                 except Exception:
-                    logger.debug("Failed to abandon deliberation %s", decision_id)
+                    logger.debug("Failed to delete deliberation %s", decision_id)
             else:
                 try:
+                    # Capture thinking blocks as deliberation trace
+                    if turn_result.thinking_blocks:
+                        for thinking in turn_result.thinking_blocks:
+                            # Truncate individual blocks to 500 chars for storage
+                            await self._deliberation.think(
+                                decision_id,
+                                thinking[:500],
+                                agent_id,
+                                session=session,
+                            )
+                        logger.info(
+                            "Captured %d thinking blocks for decision %s",
+                            len(turn_result.thinking_blocks), decision_id,
+                        )
+
                     has_tool_errors = any(tr.error for tr in turn_result.tool_results)
                     if turn_result.error is not None:
                         confidence = 0.3
