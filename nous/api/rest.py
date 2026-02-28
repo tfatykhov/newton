@@ -5,6 +5,8 @@ Endpoints:
   DELETE /chat/{session}  - End conversation
   GET  /status            - Agent status + memory stats + calibration
   GET  /decisions         - List recent decisions (Brain)
+  GET  /decisions/unreviewed - Unreviewed decisions for external agents
+  POST /decisions/{id}/review - External decision review
   GET  /decisions/{id}    - Get decision detail
   GET  /episodes          - List recent episodes (Heart)
   GET  /facts             - Search facts (Heart)
@@ -391,12 +393,57 @@ def create_app(
             logger.error("POST /reinitiate failed: %s", e)
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    # ------------------------------------------------------------------
+    # 008.5: Decision Review Loop endpoints
+    # ------------------------------------------------------------------
+
+    async def review_decision(request: Request) -> JSONResponse:
+        """POST /decisions/{id}/review — external review endpoint."""
+        decision_id = request.path_params["id"]
+        body = await request.json()
+
+        outcome = body.get("outcome")
+        result_text = body.get("result")
+        reviewer = body.get("reviewer", "external")
+
+        if not outcome:
+            return JSONResponse({"error": "outcome is required"}, status_code=400)
+
+        try:
+            detail = await brain.review(
+                UUID(decision_id),
+                outcome=outcome,
+                result=result_text,
+                reviewer=reviewer,
+            )
+            return JSONResponse(detail.model_dump(mode="json"))
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+
+    async def list_unreviewed(request: Request) -> JSONResponse:
+        """GET /decisions/unreviewed — unreviewed decisions for external agents."""
+        stakes = request.query_params.get("stakes")
+        max_age_days = int(request.query_params.get("max_age_days", "30"))
+        limit = int(request.query_params.get("limit", "20"))
+
+        decisions = await brain.get_unreviewed(
+            max_age_days=max_age_days,
+            stakes=stakes,
+        )
+        decisions = decisions[:limit]
+        return JSONResponse({
+            "decisions": [d.model_dump(mode="json") for d in decisions],
+            "total": len(decisions),
+        })
+
     routes = [
         Route("/chat", chat, methods=["POST"]),
         Route("/chat/stream", chat_stream, methods=["POST"]),
         Route("/chat/{session_id}", end_chat, methods=["DELETE"]),
         Route("/status", status),
         Route("/decisions", list_decisions),
+        Route("/decisions/unreviewed", list_unreviewed),
+        Route("/decisions/{id}/review", review_decision, methods=["POST"]),
         Route("/decisions/{id}", get_decision),
         Route("/episodes", list_episodes),
         Route("/facts", search_facts),

@@ -64,6 +64,7 @@ All shipped implementation specs with PR references:
 | 008.2 | Topic-Aware Recall v2 | 📋 Specced | — full spec deferred; spike merged |
 | 008.3 | Episode Summary Backfill & Lifecycle | ✅ Shipped | #79 — backfill unsummarized episodes, active flag lifecycle |
 | 008.4 | Episode Summary Quality | ✅ Shipped | — enhanced prompt, candidate_facts, smart truncation, decision context |
+| 008.5 | Decision Review Loop | 🏗️ In Progress | — auto-review signals, REST endpoints, calibration |
 | 009.1-009.4 | Memory Lifecycle Implementation | 📦 Shelved | — system too young (53 facts, 86 episodes at time of assessment) |
 | 010.1 | Health Dashboard (F007 Phase 1) | 📋 Specced | — enrich GET /status |
 | — | Streaming Keepalive + Tool Timeout | ✅ Shipped | #73 — keepalive during Anthropic wait, `NOUS_TOOL_TIMEOUT` |
@@ -107,10 +108,10 @@ All shipped implementation specs with PR references:
 ## Stats
 
 - **Total source:** ~32,800 lines of Python
-- **Test count:** 786 tests across 45 test files
+- **Test count:** 857 tests across 46 test files
 - **Database:** 16 tables across 2 schemas (brain, heart)
 - **Tools:** 10 agent tools (record_decision, recall_deep, learn_fact, create_censor, store_identity, complete_initiation, bash, read_file, write_file, web_search, web_fetch)
-- **Endpoints:** 15 REST endpoints + MCP server + Telegram bot
+- **Endpoints:** 17 REST endpoints + MCP server + Telegram bot
 - **Feature specs:** 14 feature docs + 17 research notes
 - **Voice:** 3 communication procedures (email, Telegram, A2A) + 2 censors
 
