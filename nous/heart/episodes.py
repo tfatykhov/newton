@@ -312,27 +312,32 @@ class EpisodeManager:
         self,
         limit: int = 10,
         outcome: str | None = None,
+        hours: int | None = None,
         session: AsyncSession | None = None,
     ) -> list[EpisodeSummary]:
         """List recent episodes ordered by started_at DESC."""
         if session is None:
             async with self.db.session() as session:
-                return await self._list_recent(limit, outcome, session)
-        return await self._list_recent(limit, outcome, session)
+                return await self._list_recent(limit, outcome, hours, session)
+        return await self._list_recent(limit, outcome, hours, session)
 
     async def _list_recent(
         self,
         limit: int,
         outcome: str | None,
+        hours: int | None,
         session: AsyncSession,
     ) -> list[EpisodeSummary]:
         stmt = (
             select(Episode)
             .where(Episode.agent_id == self.agent_id)
-            .where(Episode.active == True)  # noqa: E712
+            .where(Episode.ended_at.isnot(None))
             .order_by(Episode.started_at.desc())
             .limit(limit)
         )
+        if hours is not None:
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
+            stmt = stmt.where(Episode.started_at >= cutoff)
         if outcome is not None:
             stmt = stmt.where(Episode.outcome == outcome)
         else:
