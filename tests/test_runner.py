@@ -415,7 +415,7 @@ async def test_end_conversation_with_reflection(mock_cognitive, mock_settings):
     async def mock_tool_loop(system_prompt, conversation, frame_id):
         nonlocal turn_counter
         turn_counter += 1
-        return (f"Response {turn_counter}", [])
+        return (f"Response {turn_counter}", [], {}, [])
 
     r._tool_loop = mock_tool_loop
 
@@ -845,7 +845,7 @@ async def test_tool_loop_preserves_thinking_blocks(mock_cognitive):
     conv = Conversation(session_id="test")
     conv.messages.append(type("M", (), {"role": "user", "content": "do something"})())
 
-    text, tool_results, usage = await r._tool_loop("system", conv, "task")
+    text, tool_results, usage, _ = await r._tool_loop("system", conv, "task")
 
     assert text == "Done."
     # The assistant message in the messages list should have thinking blocks
@@ -892,6 +892,6 @@ async def test_tool_loop_preserves_redacted_thinking(mock_cognitive):
     conv = Conversation(session_id="test")
     conv.messages.append(type("M", (), {"role": "user", "content": "test"})())
 
-    text, _, _ = await r._tool_loop("system", conv, "task")
+    text, _, _, _ = await r._tool_loop("system", conv, "task")
     assert text == "Result."
     await r.close()

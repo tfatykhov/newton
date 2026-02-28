@@ -372,22 +372,25 @@ class CognitiveLayer:
                 except Exception:
                     logger.debug("Failed to delete deliberation %s", decision_id)
             else:
-                try:
-                    # Capture thinking blocks as deliberation trace
-                    if turn_result.thinking_blocks:
-                        for thinking in turn_result.thinking_blocks:
-                            # Truncate individual blocks to 500 chars for storage
+                # Capture thinking blocks as deliberation trace (best-effort)
+                if turn_result.thinking_blocks:
+                    for thinking in turn_result.thinking_blocks:
+                        try:
                             await self._deliberation.think(
                                 decision_id,
-                                thinking[:500],
+                                thinking[:2000],
                                 agent_id,
                                 session=session,
                             )
-                        logger.info(
-                            "Captured %d thinking blocks for decision %s",
-                            len(turn_result.thinking_blocks), decision_id,
-                        )
+                        except Exception:
+                            logger.debug("Failed to capture thinking block for %s", decision_id)
+                    logger.info(
+                        "Captured %d thinking blocks for decision %s",
+                        len(turn_result.thinking_blocks), decision_id,
+                    )
 
+                # Finalize deliberation (always attempted, even if think() failed)
+                try:
                     has_tool_errors = any(tr.error for tr in turn_result.tool_results)
                     if turn_result.error is not None:
                         confidence = 0.3

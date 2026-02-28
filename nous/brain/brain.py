@@ -403,30 +403,23 @@ class Brain:
         await self._delete(decision_id, session)
 
     async def _delete(self, decision_id: UUID, session: AsyncSession) -> None:
-        """Internal delete — cascading removal of decision + related records."""
-        # Delete related records first (FK constraints)
+        """Internal delete — cascading removal of decision + related records.
+
+        Most FK references use CASCADE (auto-handled by Postgres).
+        Two NO ACTION FKs need explicit NULL-out: heart.facts.source_decision_id
+        and heart.censors.learned_from_decision.
+        """
+        # NULL-out NO ACTION FK references in heart tables
         await session.execute(
-            text("DELETE FROM brain.thoughts WHERE decision_id = :did"),
+            text("UPDATE heart.facts SET source_decision_id = NULL WHERE source_decision_id = :did"),
             {"did": decision_id},
         )
         await session.execute(
-            text("DELETE FROM brain.decision_tags WHERE decision_id = :did"),
+            text("UPDATE heart.censors SET learned_from_decision = NULL WHERE learned_from_decision = :did"),
             {"did": decision_id},
         )
-        await session.execute(
-            text("DELETE FROM brain.decision_reasons WHERE decision_id = :did"),
-            {"did": decision_id},
-        )
-        await session.execute(
-            text("DELETE FROM brain.decision_bridge WHERE decision_id = :did"),
-            {"did": decision_id},
-        )
-        # Delete edges from graph
-        await session.execute(
-            text("DELETE FROM brain.graph_edges WHERE source_id = :did OR target_id = :did"),
-            {"did": decision_id},
-        )
-        # Delete the decision itself
+        # Delete the decision — CASCADE handles brain.thoughts, decision_tags,
+        # decision_reasons, decision_bridge, graph_edges, episode_decisions
         await session.execute(
             text("DELETE FROM brain.decisions WHERE id = :did"),
             {"did": decision_id},
