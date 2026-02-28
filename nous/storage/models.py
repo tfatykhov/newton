@@ -135,6 +135,8 @@ class Decision(Base):
     outcome: Mapped[str | None] = mapped_column(String(20), server_default="pending")
     outcome_result: Mapped[str | None] = mapped_column(Text)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session_id: Mapped[str | None] = mapped_column(String(100))
+    reviewer: Mapped[str | None] = mapped_column(String(50))
     embedding = mapped_column(Vector(1536), nullable=True)
     # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
     created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
