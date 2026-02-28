@@ -514,6 +514,7 @@ class EpisodeManager:
             lessons_learned=episode.lessons_learned or [],
             tags=episode.tags or [],
             decision_ids=decision_ids,
+            active=episode.active,
             structured_summary=episode.structured_summary,
             user_id=episode.user_id,
             user_display_name=episode.user_display_name,

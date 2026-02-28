@@ -269,7 +269,7 @@ async def test_update_summary_partial_data(heart, session):
     updated = await heart.get_episode(detail.id, session=session)
     assert updated.title == "Quick Chat"
     assert updated.summary == "test input"  # Not overwritten — no "summary" in structured
-    assert updated.lessons_learned is None  # Not set — no "key_points"
+    assert updated.lessons_learned == []  # Not set — no "key_points" (_to_detail converts None → [])
 
 
 # ---------------------------------------------------------------------------
