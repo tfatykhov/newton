@@ -57,22 +57,39 @@ All shipped implementation specs with PR references:
 | 007.4 | Fix Unpopulated Columns | ✅ Shipped | #55 |
 | 007.5 | Recall Min Threshold | ⏸ Reverted | #59 — superseded by 008 |
 | 008 | Agent Identity & Tiered Context | ✅ Shipped | #60, #61, #62 — F018 identity + tiered context + API |
+| 008.1-P1 | Tool Output Pruning + Token Estimation | ✅ Shipped | #69 |
+| 008.1-P2 | History Compaction Core | ✅ Shipped | #70 |
+| 008.1-P3 | Durable Integration (persistence, events, knowledge extraction) | ✅ Shipped | #71 |
+| 008.1-P4 | Adaptive Compaction | 📋 Specced | — |
+| 008.2 | Topic-Aware Recall v2 | 📋 Specced | — full spec deferred; spike merged |
+| 009.1-009.4 | Memory Lifecycle Implementation | 📦 Shelved | — system too young (53 facts, 86 episodes at time of assessment) |
+| 010.1 | Health Dashboard (F007 Phase 1) | 📋 Specced | — enrich GET /status |
+| — | Streaming Keepalive + Tool Timeout | ✅ Shipped | #73 — keepalive during Anthropic wait, `NOUS_TOOL_TIMEOUT` |
+| — | Typing Indicator Fix | ✅ Shipped | — continuous typing via background task |
+| — | Topic Persistence Spike | ✅ Shipped | #75 — `_resolve_focus_text()` follow-up detection |
+| — | Deliberation Thinking Capture | ✅ Shipped | #76 — extended thinking blocks → `brain.thoughts`, garbage cleanup |
+| — | Phase 1 Voice | ✅ Shipped | — 3 procedures (send_email, notify_tim, talk_to_emerson) + 2 censors |
+| — | RRF Score Fix | ✅ Shipped | #64 — use original hybrid scores instead of RRF ranking |
+| — | Query Deduplication Fix | ✅ Shipped | — prevent doubled query when topic = input |
+| — | Tier 3 Threshold Tuning | ✅ Shipped | #66 — decision threshold 0.3→0.20 |
 
 ### Phase 2 — Quality (next to build)
 
 | Feature | Name | Priority | Description |
 |---------|------|----------|-------------|
-| #38 | _is_informational() Phase 2 | P1 | Decision-language detection + frame heuristic. Needs real-world data to tune. |
-| #52 | Topic-Aware Recall v2 | P1 | Frame-topic alignment check (skipped from 007.2). |
+| #38 | _is_informational() Phase 2 | P1 | Partially addressed by PR #76 (delete instead of abandon). Further tuning possible. |
+| #52 | Topic-Aware Recall v2 | P1 | Spike merged (#75). Full 008.2 spec exists if spike proves insufficient. |
 | F011 | [Skill Discovery](F011-skill-discovery.md) | P1 | Index workspace skills as procedures, auto-surface in RECALL based on task/frame. |
+| 010.1 | Health Dashboard | P1 | Enrich GET /status with episode outcome breakdown, fact health, decision stats. |
 
 ### Phase 3 — Growth
 
 | Feature | Name | Priority | Description |
 |---------|------|----------|-------------|
-| F007 | Metrics & Growth | P2 | Calibration, Brier scores, outcome tracking. Needs clean decisions from Phase 2. |
-| F008 | Memory Lifecycle | P2 | Decay, pruning, sleep phases 2/3/5. Needs identity layer to know what's permanent. |
+| F007 | Metrics & Growth | P2 | Calibration, Brier scores, outcome tracking. Decision data now clean (27 real decisions). |
+| F008 | Memory Lifecycle | P2 | Shelved — system too young. Revisit when data grows. Specs 009.1-009.4 written. |
 | F012 | K-Line Learning | P2 | Auto-create procedures from repeated patterns. |
+| 008.1-P4 | Adaptive Compaction | P2 | LLM-powered summarization with configurable triggers. Spec written. |
 
 ### Future
 
@@ -83,15 +100,17 @@ All shipped implementation specs with PR references:
 | F015 | Growth Engine | Administrative self-improvement (Papert's Principle) |
 | F016 | Multi-Agent | Nous agents sharing knowledge |
 | F017 | Dashboard | Visual growth tracking and cognitive state |
-| F019 | [Nous Website](F019-nous-website.md) | Developer-first open-source framework site |
+| F019 | [Nous Website](F019-nous-website.md) | Developer-first open-source framework site (mem-brain.ai) |
 
 ## Stats
 
-- **Total source:** ~14,500 lines of Python
-- **Test count:** 671 tests across 41 test files
-- **Database:** 19 tables across 3 schemas (brain, heart, system)
+- **Total source:** ~32,800 lines of Python
+- **Test count:** 786 tests across 45 test files
+- **Database:** 16 tables across 2 schemas (brain, heart)
 - **Tools:** 10 agent tools (record_decision, recall_deep, learn_fact, create_censor, store_identity, complete_initiation, bash, read_file, write_file, web_search, web_fetch)
 - **Endpoints:** 15 REST endpoints + MCP server + Telegram bot
+- **Feature specs:** 14 feature docs + 17 research notes
+- **Voice:** 3 communication procedures (email, Telegram, A2A) + 2 censors
 
 ## Research Notes
 
@@ -112,15 +131,15 @@ All shipped implementation specs with PR references:
 | [013](../research/013-langchain-memory-lessons.md) | LangChain Memory Lessons | 5 takeaways: reflection, generalization, validation, approval gates |
 | [014](../research/014-group-evolving-agents.md) | GEA | Experience sharing for open-ended self-improvement |
 | [015](../research/015-deep-thinking-ratio.md) | DTR | Measuring real reasoning effort, not token count |
+| [016](../research/016-agent-memory-synthesis.md) | Agent Memory Synthesis | 9 papers on LLM agent memory (2025-2026) — retrieval, consolidation, generalization |
 
 ## Architecture Summary
 
 ![Nous Architecture](../nous-architecture.png)
 
-## Database: 18 Tables, 3 Schemas
+## Database: 16 Tables, 2 Schemas
 
 | Schema | Tables | Purpose |
 |--------|--------|---------|
-| `brain` (7) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
-| `heart` (7) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory | Memory system |
-| `system` (5) | agents, agent_identity, frames, events, context_metrics | Config, tracking, identity |
+| `brain` (8) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
+| `heart` (8) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory, conversation_state | Memory system |
