@@ -288,8 +288,13 @@ All core architecture is implemented and running:
 | Extended Thinking (007) | ✅ Shipped | Adaptive thinking, interleaved reasoning, thinking indicators |
 | Context Recall (007.2-007.5) | ✅ Shipped | Topic-aware recall, informational detection, relevance thresholds |
 | Agent Identity (008/F018) | ✅ Shipped | DB-backed identity, initiation protocol, tiered context, REST API |
+| Conversation Compaction (008.1) | ✅ Shipped | Tool output pruning, history compaction, durable persistence (3 phases) |
+| Streaming & Reliability | ✅ Shipped | Keepalive during Anthropic wait, tool timeout, typing indicators |
+| Topic Persistence | ✅ Shipped | Follow-up detection, current_task preservation across turns |
+| Deliberation Capture | ✅ Shipped | Extended thinking blocks → deliberation traces, garbage cleanup |
+| Phase 1 Voice | ✅ Shipped | Email, Telegram notify, Emerson A2A — zero code changes via procedures |
 
-**Stats:** ~14,500 lines of Python · 671 tests · 19 Postgres tables · Docker deployment
+**Stats:** ~32,800 lines of Python · 786 tests · 16 Postgres tables · Docker deployment
 
 See [Feature Index](docs/features/INDEX.md) for the full breakdown.
 
