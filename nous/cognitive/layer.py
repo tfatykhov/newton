@@ -43,6 +43,24 @@ _MIN_CONTENT_LENGTH = 200  # Combined user+assistant chars
 _MIN_TURNS_WITHOUT_TOOLS = 1  # R: off-by-one fix — turn_count is incremented in post_turn,
                                # so during turn 2's pre_turn, turn_count==1
 
+# 008.6: Recap query detection
+_RECAP_PATTERNS = frozenset({
+    "what did we talk about",
+    "what have we discussed",
+    "what did we do",
+    "recent conversations",
+    "catch me up",
+    "what happened",
+    "recap",
+    "summary of recent",
+})
+
+
+def _is_recap_query(user_input: str) -> bool:
+    """Detect if user is asking for a temporal recap."""
+    lower = user_input.lower().strip()
+    return any(p in lower for p in _RECAP_PATTERNS)
+
 
 class CognitiveLayer:
     """The Nous Loop — orchestrates Brain and Heart into cognition.

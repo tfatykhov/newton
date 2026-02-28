@@ -473,3 +473,38 @@ class TestRecallRecentTool:
                 pass  # task frame includes all
             else:
                 assert "recall_recent" in tools, f"recall_recent missing from {frame}"
+
+
+# ---------------------------------------------------------------------------
+# TestRecapDetection (Phase 4, Task 5)
+# ---------------------------------------------------------------------------
+
+
+class TestRecapDetection:
+
+    @pytest.mark.parametrize("query", [
+        "what did we talk about",
+        "What did we talk about recently?",
+        "what have we discussed",
+        "catch me up",
+        "recap",
+        "give me a recap of recent conversations",
+        "what happened today",
+        "summary of recent discussions",
+        "what did we do yesterday",
+    ])
+    def test_recap_patterns_detected(self, query):
+        from nous.cognitive.layer import _is_recap_query
+        assert _is_recap_query(query) is True
+
+    @pytest.mark.parametrize("query", [
+        "how do I fix this bug",
+        "what is the capital of France",
+        "write a function to sort a list",
+        "hello",
+        "thanks",
+        "tell me about the architecture",
+    ])
+    def test_non_recap_not_detected(self, query):
+        from nous.cognitive.layer import _is_recap_query
+        assert _is_recap_query(query) is False
