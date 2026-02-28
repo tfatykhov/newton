@@ -19,6 +19,7 @@ import httpx
 from nous.config import Settings
 from nous.events import Event, EventBus
 from nous.handlers import build_anthropic_headers
+from nous.brain.brain import Brain
 from nous.heart.heart import Heart
 
 logger = logging.getLogger(__name__)
@@ -73,11 +74,13 @@ class EpisodeSummarizer:
     def __init__(
         self,
         heart: Heart,
+        brain: Brain | None,
         settings: Settings,
         bus: EventBus,
         http_client: httpx.AsyncClient | None = None,
     ):
         self._heart = heart
+        self._brain = brain
         self._settings = settings
         self._bus = bus
         self._http = http_client
@@ -103,7 +106,8 @@ class EpisodeSummarizer:
                 return
 
             # Call LLM for summary
-            summary = await self._generate_summary(transcript)
+            decision_context = await self._build_decision_context(episode_id)
+            summary = await self._generate_summary(transcript, decision_context)
             if not summary:
                 return
 
@@ -127,7 +131,7 @@ class EpisodeSummarizer:
         except Exception:
             logger.exception("Failed to summarize episode %s", episode_id)
 
-    async def _generate_summary(self, transcript: str) -> dict[str, Any] | None:
+    async def _generate_summary(self, transcript: str, decision_context: str = "") -> dict[str, Any] | None:
         """Call LLM to generate structured summary."""
         if not self._http:
             logger.warning("No HTTP client for episode summarizer")
@@ -135,7 +139,7 @@ class EpisodeSummarizer:
 
         transcript = self._truncate_transcript(transcript)
 
-        prompt = _SUMMARY_PROMPT.format(transcript=transcript, decision_context="")
+        prompt = _SUMMARY_PROMPT.format(transcript=transcript, decision_context=decision_context)
         headers = build_anthropic_headers(self._settings)
 
         try:
@@ -219,3 +223,27 @@ class EpisodeSummarizer:
         result.append(last)
 
         return "\n\n".join(result)
+
+    async def _build_decision_context(self, episode_id: str) -> str:
+        """008.4: Fetch decisions linked to this episode for richer summarization."""
+        if not self._brain:
+            return ""
+
+        try:
+            episode = await self._heart.get_episode(UUID(episode_id))
+            if not episode or not episode.decision_ids:
+                return ""
+
+            lines = ["Decisions made during this episode:"]
+            for decision_id in episode.decision_ids:
+                d = await self._brain.get(decision_id)
+                if d:
+                    lines.append(
+                        f"- [{d.category}/{d.stakes}] {d.description} "
+                        f"(confidence: {d.confidence})"
+                    )
+
+            return "\n".join(lines) if len(lines) > 1 else ""
+        except Exception:
+            logger.debug("Failed to build decision context for episode %s", episode_id)
+            return ""

@@ -106,7 +106,7 @@ async def create_components(settings: Settings) -> dict:
             from nous.handlers.episode_summarizer import EpisodeSummarizer
 
             if settings.episode_summary_enabled:
-                EpisodeSummarizer(heart, settings, bus, handler_http)
+                EpisodeSummarizer(heart, brain, settings, bus, handler_http)
         except ImportError:
             logger.debug("EpisodeSummarizer not available yet")
 

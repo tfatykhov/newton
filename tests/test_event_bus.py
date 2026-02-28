@@ -257,16 +257,17 @@ class TestEventBus:
 class TestEpisodeSummarizer:
     """Episode summary handler tests."""
 
-    def _make_summarizer(self, heart=None, settings=None, bus=None, http_client=None):
+    def _make_summarizer(self, heart=None, settings=None, bus=None, http_client=None, brain=None):
         from nous.handlers.episode_summarizer import EpisodeSummarizer
 
         heart = heart or AsyncMock()
+        brain = brain or AsyncMock()
         settings = settings or _mock_settings()
         bus = bus or MagicMock(spec=EventBus)
         bus.on = MagicMock()
         bus.emit = AsyncMock()
         http_client = http_client or AsyncMock(spec=httpx.AsyncClient)
-        summarizer = EpisodeSummarizer(heart, settings, bus, http_client)
+        summarizer = EpisodeSummarizer(heart, brain, settings, bus, http_client)
         return summarizer, heart, bus, http_client
 
     @pytest.mark.asyncio
@@ -461,6 +462,51 @@ class TestEpisodeSummarizer:
         bus.emit.assert_called_once()
         emitted = bus.emit.call_args[0][0]
         assert emitted.data["candidate_facts"] == ["Project uses PostgreSQL 17 with pgvector for embeddings"]
+
+    @pytest.mark.asyncio
+    async def test_build_decision_context_with_decisions(self):
+        """008.4: Decision context includes linked decisions."""
+        brain = AsyncMock()
+        brain.get = AsyncMock(return_value=MagicMock(
+            description="Use PostgreSQL for storage",
+            category="architecture",
+            stakes="high",
+            confidence=0.9,
+        ))
+        heart = AsyncMock()
+        heart.get_episode = AsyncMock(return_value=MagicMock(
+            decision_ids=[uuid4()],
+            structured_summary=None,
+        ))
+        summarizer, _, _, _ = self._make_summarizer(heart=heart, brain=brain)
+
+        result = await summarizer._build_decision_context(str(uuid4()))
+        assert "Decisions made during this episode:" in result
+        assert "Use PostgreSQL for storage" in result
+        assert "architecture" in result
+
+    @pytest.mark.asyncio
+    async def test_build_decision_context_no_decisions(self):
+        """008.4: Empty string when no decisions linked."""
+        brain = AsyncMock()
+        heart = AsyncMock()
+        heart.get_episode = AsyncMock(return_value=MagicMock(decision_ids=[]))
+        summarizer, _, _, _ = self._make_summarizer(heart=heart, brain=brain)
+
+        result = await summarizer._build_decision_context(str(uuid4()))
+        assert result == ""
+
+    @pytest.mark.asyncio
+    async def test_build_decision_context_error_returns_empty(self):
+        """008.4: Returns empty string on Brain errors."""
+        brain = AsyncMock()
+        brain.get = AsyncMock(side_effect=Exception("Brain unavailable"))
+        heart = AsyncMock()
+        heart.get_episode = AsyncMock(return_value=MagicMock(decision_ids=[uuid4()]))
+        summarizer, _, _, _ = self._make_summarizer(heart=heart, brain=brain)
+
+        result = await summarizer._build_decision_context(str(uuid4()))
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_truncate_noop_under_limit(self):
