@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import delete, select, text
@@ -38,6 +38,7 @@ from nous.brain.schemas import (
 from nous.config import Settings
 from nous.storage.database import Database
 from nous.storage.models import (
+    CalibrationSnapshot,
     Decision,
     DecisionBridge,
     DecisionReason,
@@ -244,6 +245,7 @@ class Brain:
             stakes=input.stakes,
             quality_score=quality_score,
             embedding=embedding,
+            session_id=input.session_id,
         )
 
         # Populate relationships for ORM cascade
@@ -708,25 +710,27 @@ class Brain:
         decision_id: UUID,
         outcome: str,
         result: str | None = None,
+        reviewer: str | None = None,
         session: AsyncSession | None = None,
     ) -> DecisionDetail:
         """Record outcome for a decision."""
         if session is None:
             async with self.db.session() as session:
-                detail = await self._review(decision_id, outcome, result, session)
+                detail = await self._review(decision_id, outcome, result, reviewer, session)
                 await session.commit()
                 return detail
-        return await self._review(decision_id, outcome, result, session)
+        return await self._review(decision_id, outcome, result, reviewer, session)
 
     async def _review(
         self,
         decision_id: UUID,
         outcome: str,
         result_text: str | None,
+        reviewer: str | None,
         session: AsyncSession,
     ) -> DecisionDetail:
         # Validate via Pydantic (P2-18)
-        validated = ReviewInput(outcome=outcome, result=result_text)
+        validated = ReviewInput(outcome=outcome, result=result_text, reviewer=reviewer)
 
         decision = await self._get_decision_orm(decision_id, session)
         if decision is None:
@@ -735,6 +739,7 @@ class Brain:
         decision.outcome = validated.outcome
         decision.outcome_result = validated.result
         decision.reviewed_at = datetime.now(UTC)
+        decision.reviewer = validated.reviewer
 
         await session.flush()
 
@@ -745,10 +750,132 @@ class Brain:
             {
                 "decision_id": str(decision_id),
                 "outcome": validated.outcome,
+                "reviewer": validated.reviewer,
             },
         )
 
         return self._decision_to_detail(decision)
+
+    # ------------------------------------------------------------------
+    # get_session_decisions()
+    # ------------------------------------------------------------------
+
+    async def get_session_decisions(
+        self, session_id: str, session: AsyncSession | None = None,
+    ) -> list[DecisionSummary]:
+        """Fetch decisions made during a specific session."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get_session_decisions(session_id, session)
+        return await self._get_session_decisions(session_id, session)
+
+    async def _get_session_decisions(
+        self, session_id: str, session: AsyncSession,
+    ) -> list[DecisionSummary]:
+        stmt = (
+            select(Decision)
+            .where(Decision.agent_id == self.agent_id, Decision.session_id == session_id)
+            .order_by(Decision.created_at)
+        )
+        result = await session.execute(stmt)
+        return [self._decision_to_summary(d) for d in result.scalars().all()]
+
+    # ------------------------------------------------------------------
+    # get_unreviewed()
+    # ------------------------------------------------------------------
+
+    async def get_unreviewed(
+        self, max_age_days: int = 30, stakes: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[DecisionSummary]:
+        """Fetch unreviewed decisions, optionally filtered by stakes."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get_unreviewed(max_age_days, stakes, session)
+        return await self._get_unreviewed(max_age_days, stakes, session)
+
+    async def _get_unreviewed(
+        self, max_age_days: int, stakes: str | None, session: AsyncSession,
+    ) -> list[DecisionSummary]:
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+        stmt = (
+            select(Decision)
+            .where(
+                Decision.agent_id == self.agent_id,
+                Decision.reviewed_at.is_(None),
+                Decision.created_at >= cutoff,
+            )
+            .order_by(Decision.created_at)
+        )
+        if stakes:
+            stmt = stmt.where(Decision.stakes == stakes)
+        result = await session.execute(stmt)
+        return [self._decision_to_summary(d) for d in result.scalars().all()]
+
+    # ------------------------------------------------------------------
+    # generate_calibration_snapshot()
+    # ------------------------------------------------------------------
+
+    async def generate_calibration_snapshot(
+        self, session: AsyncSession | None = None,
+    ) -> CalibrationReport:
+        """Compute calibration metrics and store a snapshot."""
+        if session is None:
+            async with self.db.session() as session:
+                report = await self.calibration.compute(session, self.agent_id)
+                snapshot = CalibrationSnapshot(
+                    agent_id=self.agent_id,
+                    total_decisions=report.total_decisions,
+                    reviewed_decisions=report.reviewed_decisions,
+                    brier_score=report.brier_score,
+                    accuracy=report.accuracy,
+                    confidence_mean=report.confidence_mean,
+                    confidence_stddev=report.confidence_stddev,
+                    category_stats=report.category_stats,
+                    reason_stats=report.reason_type_stats,
+                )
+                session.add(snapshot)
+                await session.commit()
+                return report
+        report = await self.calibration.compute(session, self.agent_id)
+        snapshot = CalibrationSnapshot(
+            agent_id=self.agent_id,
+            total_decisions=report.total_decisions,
+            reviewed_decisions=report.reviewed_decisions,
+            brier_score=report.brier_score,
+            accuracy=report.accuracy,
+            confidence_mean=report.confidence_mean,
+            confidence_stddev=report.confidence_stddev,
+            category_stats=report.category_stats,
+            reason_stats=report.reason_type_stats,
+        )
+        session.add(snapshot)
+        await session.flush()
+        return report
+
+    # ------------------------------------------------------------------
+    # get_episode_for_decision()
+    # ------------------------------------------------------------------
+
+    async def get_episode_for_decision(
+        self, decision_id: UUID, session: AsyncSession | None = None,
+    ):
+        """Get the episode linked to a decision via episode_decisions table."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get_episode_for_decision(decision_id, session)
+        return await self._get_episode_for_decision(decision_id, session)
+
+    async def _get_episode_for_decision(self, decision_id: UUID, session: AsyncSession):
+        from nous.storage.models import EpisodeDecision, Episode
+        stmt = (
+            select(Episode)
+            .join(EpisodeDecision, Episode.id == EpisodeDecision.episode_id)
+            .where(EpisodeDecision.decision_id == decision_id)
+            .limit(1)
+        )
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
 
     # ------------------------------------------------------------------
     # get_calibration()
@@ -1062,10 +1189,26 @@ class Brain:
             outcome=decision.outcome or "pending",
             outcome_result=decision.outcome_result,
             reviewed_at=decision.reviewed_at,
+            reviewer=decision.reviewer,
             created_at=decision.created_at,
             updated_at=decision.updated_at,
             tags=[t.tag for t in decision.tags],
             reasons=[ReasonInput(type=r.type, text=r.text) for r in decision.reasons],
             bridge=bridge,
             thoughts=[ThoughtInfo(id=t.id, text=t.text, created_at=t.created_at) for t in decision.thoughts],
+        )
+
+    def _decision_to_summary(self, decision: Decision) -> DecisionSummary:
+        """Convert an ORM Decision to a DecisionSummary Pydantic model."""
+        return DecisionSummary(
+            id=decision.id,
+            description=decision.description,
+            confidence=decision.confidence,
+            category=decision.category,
+            stakes=decision.stakes,
+            outcome=decision.outcome or "pending",
+            pattern=decision.pattern,
+            tags=[],
+            reviewed_at=decision.reviewed_at,
+            created_at=decision.created_at,
         )

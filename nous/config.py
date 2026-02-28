@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     episode_summary_enabled: bool = True
     fact_extraction_enabled: bool = True
     sleep_enabled: bool = True
+    decision_review_enabled: bool = True
+    github_token: str = Field(
+        default="",
+        validation_alias="GITHUB_TOKEN",
+    )
     background_model: str = Field(
         default="claude-sonnet-4-5-20250514",
         validation_alias="NOUS_BACKGROUND_MODEL",
