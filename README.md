@@ -292,6 +292,7 @@ All core architecture is implemented and running:
 | Streaming & Reliability | ✅ Shipped | Keepalive during Anthropic wait, tool timeout, typing indicators |
 | Topic Persistence | ✅ Shipped | Follow-up detection, current_task preservation across turns |
 | Deliberation Capture | ✅ Shipped | Extended thinking blocks → deliberation traces, garbage cleanup |
+| Episode Summary Quality (008.3-008.4) | ✅ Shipped | Backfill + enhanced prompt, candidate_facts, smart truncation, decision context |
 | Phase 1 Voice | ✅ Shipped | Email, Telegram notify, Emerson A2A — zero code changes via procedures |
 
 **Stats:** ~32,800 lines of Python · 786 tests · 16 Postgres tables · Docker deployment
