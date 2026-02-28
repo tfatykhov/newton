@@ -1,15 +1,17 @@
-"""Unit tests for 008.5 Decision Review Loop — API surface tests.
+"""Unit tests for 008.5 Decision Review Loop.
 
-Tests cover Tasks 2-8: ORM model updates, schema extensions,
-new Brain methods, and config additions.  All tests use mocks
-(no real DB) to verify the public contract.
+Tests cover Tasks 2-15: ORM model updates, schema extensions,
+new Brain methods, config additions, signals, and handler.
+All tests use mocks (no real DB) to verify the public contract.
 
-7 test classes, ~10 tests total.
+12 test classes, 27 tests total.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -21,6 +23,15 @@ from nous.brain.schemas import (
     ReviewInput,
 )
 from nous.config import Settings
+from nous.handlers.decision_reviewer import (
+    CONFIDENCE_THRESHOLD,
+    DecisionReviewer,
+    EpisodeSignal,
+    ErrorSignal,
+    FileExistsSignal,
+    GitHubSignal,
+    ReviewResult,
+)
 from nous.storage.models import Decision
 
 
@@ -192,3 +203,346 @@ class TestConfigAdditions:
         """Settings should have github_token defaulting to empty string."""
         s = Settings(ANTHROPIC_API_KEY="test")
         assert s.github_token == ""
+
+
+# ===========================================================================
+# Helpers for Tasks 9-15
+# ===========================================================================
+
+_NOW = datetime.now(timezone.utc)
+
+
+def _make_decision(
+    *,
+    confidence: float = 0.8,
+    description: str = "Use Postgres for storage",
+    outcome: str = "pending",
+    reviewed_at=None,
+    id: UUID | None = None,
+) -> DecisionSummary:
+    """Build a minimal DecisionSummary for signal tests."""
+    return DecisionSummary(
+        id=id or uuid4(),
+        description=description,
+        confidence=confidence,
+        category="architecture",
+        stakes="medium",
+        outcome=outcome,
+        reviewed_at=reviewed_at,
+        created_at=_NOW,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 10: ErrorSignal
+# ---------------------------------------------------------------------------
+
+
+class TestErrorSignal:
+    """Verify ErrorSignal catches low-confidence and error-keyword decisions."""
+
+    @pytest.mark.asyncio
+    async def test_low_confidence_returns_failure(self):
+        """Decisions with confidence < 0.4 should be auto-failed."""
+        signal = ErrorSignal()
+        result = await signal.check(_make_decision(confidence=0.3))
+        assert result is not None
+        assert result.result == "failure"
+        assert result.signal_type == "error"
+        assert "0.30" in result.explanation
+
+    @pytest.mark.asyncio
+    async def test_error_keyword_returns_failure(self):
+        """Decisions with error keywords in description should be auto-failed."""
+        signal = ErrorSignal()
+        result = await signal.check(
+            _make_decision(confidence=0.7, description="This approach failed")
+        )
+        assert result is not None
+        assert result.result == "failure"
+        assert result.signal_type == "error"
+
+    @pytest.mark.asyncio
+    async def test_normal_decision_returns_none(self):
+        """Clean decisions should return None."""
+        signal = ErrorSignal()
+        result = await signal.check(
+            _make_decision(confidence=0.8, description="Use Postgres for storage")
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 11: EpisodeSignal
+# ---------------------------------------------------------------------------
+
+
+class TestEpisodeSignal:
+    """Verify EpisodeSignal maps episode outcome to decision outcome."""
+
+    @pytest.mark.asyncio
+    async def test_resolved_episode_returns_success(self):
+        """Episode with outcome='success' should map to decision success."""
+        brain = AsyncMock()
+        episode = MagicMock()
+        episode.outcome = "success"
+        brain.get_episode_for_decision = AsyncMock(return_value=episode)
+
+        signal = EpisodeSignal(brain)
+        result = await signal.check(_make_decision())
+        assert result is not None
+        assert result.result == "success"
+        assert result.signal_type == "episode"
+
+    @pytest.mark.asyncio
+    async def test_unresolved_episode_returns_failure(self):
+        """Episode with outcome='failure' should map to decision failure."""
+        brain = AsyncMock()
+        episode = MagicMock()
+        episode.outcome = "failure"
+        brain.get_episode_for_decision = AsyncMock(return_value=episode)
+
+        signal = EpisodeSignal(brain)
+        result = await signal.check(_make_decision())
+        assert result is not None
+        assert result.result == "failure"
+        assert result.signal_type == "episode"
+
+    @pytest.mark.asyncio
+    async def test_no_linked_episode_returns_none(self):
+        """No linked episode should return None."""
+        brain = AsyncMock()
+        brain.get_episode_for_decision = AsyncMock(return_value=None)
+
+        signal = EpisodeSignal(brain)
+        result = await signal.check(_make_decision())
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 12: FileExistsSignal
+# ---------------------------------------------------------------------------
+
+
+class TestFileExistsSignal:
+    """Verify FileExistsSignal checks file existence on disk."""
+
+    @pytest.mark.asyncio
+    async def test_existing_file_returns_success(self):
+        """When a referenced file exists, should return success."""
+        signal = FileExistsSignal()
+        decision = _make_decision(
+            description="Created docs/features/INDEX.md for tracking"
+        )
+        with patch("nous.handlers.decision_reviewer.Path") as mock_path:
+            mock_path.return_value.exists.return_value = True
+            # The signal uses Path(path_str).exists(), so we need
+            # the class call to return our mock instance
+            result = await signal.check(decision)
+
+        assert result is not None
+        assert result.result == "success"
+        assert result.signal_type == "file_exists"
+
+    @pytest.mark.asyncio
+    async def test_missing_file_returns_none(self):
+        """When referenced files don't exist, should return None."""
+        signal = FileExistsSignal()
+        decision = _make_decision(
+            description="Created docs/features/INDEX.md for tracking"
+        )
+        with patch("nous.handlers.decision_reviewer.Path") as mock_path:
+            mock_path.return_value.exists.return_value = False
+            result = await signal.check(decision)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_file_path_returns_none(self):
+        """Decisions without file paths should return None."""
+        signal = FileExistsSignal()
+        decision = _make_decision(description="Use Postgres for storage")
+        result = await signal.check(decision)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 13: GitHubSignal
+# ---------------------------------------------------------------------------
+
+
+class TestGitHubSignal:
+    """Verify GitHubSignal checks PR status on GitHub."""
+
+    @pytest.mark.asyncio
+    async def test_merged_pr_returns_success(self):
+        """Merged PR should return success."""
+        http = AsyncMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"state": "closed", "merged": True}
+        http.get = AsyncMock(return_value=resp)
+
+        signal = GitHubSignal(http, "ghp_test_token")
+        decision = _make_decision(description="Implement storage layer PR #5")
+        result = await signal.check(decision)
+
+        assert result is not None
+        assert result.result == "success"
+        assert result.signal_type == "github"
+        assert "#5" in result.explanation
+
+    @pytest.mark.asyncio
+    async def test_closed_unmerged_returns_failure(self):
+        """Closed-without-merge PR should return failure."""
+        http = AsyncMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"state": "closed", "merged": False}
+        http.get = AsyncMock(return_value=resp)
+
+        signal = GitHubSignal(http, "ghp_test_token")
+        decision = _make_decision(description="Implement storage layer PR #5")
+        result = await signal.check(decision)
+
+        assert result is not None
+        assert result.result == "failure"
+        assert result.signal_type == "github"
+
+    @pytest.mark.asyncio
+    async def test_open_pr_returns_none(self):
+        """Open PR (not merged, not closed) should return None."""
+        http = AsyncMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"state": "open", "merged": False}
+        http.get = AsyncMock(return_value=resp)
+
+        signal = GitHubSignal(http, "ghp_test_token")
+        decision = _make_decision(description="Implement storage layer PR #5")
+        result = await signal.check(decision)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_token_returns_none(self):
+        """Empty token should skip GitHub check."""
+        http = AsyncMock()
+        signal = GitHubSignal(http, "")
+        decision = _make_decision(description="Implement storage layer PR #5")
+        result = await signal.check(decision)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Task 14: DecisionReviewer handler
+# ---------------------------------------------------------------------------
+
+
+class TestDecisionReviewer:
+    """Verify DecisionReviewer handler wiring and behaviour."""
+
+    def test_handler_registers_on_session_ended(self):
+        """DecisionReviewer should register on 'session_ended'."""
+        bus = MagicMock()
+        bus.on = MagicMock()
+        settings = MagicMock()
+        settings.github_token = ""
+
+        DecisionReviewer(brain=AsyncMock(), settings=settings, bus=bus)
+        bus.on.assert_called_once()
+        assert bus.on.call_args[0][0] == "session_ended"
+
+    @pytest.mark.asyncio
+    async def test_handler_reviews_session_decisions(self):
+        """Handler should auto-review unreviewed low-confidence decisions."""
+        bus = MagicMock()
+        bus.on = MagicMock()
+        brain = AsyncMock()
+        settings = MagicMock()
+        settings.github_token = ""
+
+        # Low-confidence decision triggers ErrorSignal
+        decision = _make_decision(confidence=0.3, reviewed_at=None)
+        brain.get_session_decisions = AsyncMock(return_value=[decision])
+        brain.get_unreviewed = AsyncMock(return_value=[])
+        brain.review = AsyncMock()
+
+        reviewer = DecisionReviewer(brain=brain, settings=settings, bus=bus)
+
+        # Simulate session_ended event
+        event = MagicMock()
+        event.data = {"session_id": "sess-1"}
+        event.session_id = "sess-1"
+        await reviewer.handle(event)
+
+        brain.review.assert_called()
+        call_kwargs = brain.review.call_args
+        assert call_kwargs[1]["reviewer"] == "auto" or call_kwargs.kwargs.get("reviewer") == "auto"
+
+    @pytest.mark.asyncio
+    async def test_handler_skips_already_reviewed(self):
+        """Handler should skip decisions that already have reviewed_at set."""
+        bus = MagicMock()
+        bus.on = MagicMock()
+        brain = AsyncMock()
+        settings = MagicMock()
+        settings.github_token = ""
+
+        # Already-reviewed decision
+        decision = _make_decision(confidence=0.3, reviewed_at=_NOW)
+        brain.get_session_decisions = AsyncMock(return_value=[decision])
+        brain.get_unreviewed = AsyncMock(return_value=[])
+        brain.review = AsyncMock()
+
+        reviewer = DecisionReviewer(brain=brain, settings=settings, bus=bus)
+
+        event = MagicMock()
+        event.data = {"session_id": "sess-1"}
+        event.session_id = "sess-1"
+        await reviewer.handle(event)
+
+        brain.review.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sweep_reviews_old_unreviewed(self):
+        """sweep() should review old unreviewed decisions and return results."""
+        bus = MagicMock()
+        bus.on = MagicMock()
+        brain = AsyncMock()
+        settings = MagicMock()
+        settings.github_token = ""
+
+        # Low-confidence unreviewed decision
+        decision = _make_decision(confidence=0.2, reviewed_at=None)
+        brain.get_unreviewed = AsyncMock(return_value=[decision])
+        brain.review = AsyncMock()
+
+        reviewer = DecisionReviewer(brain=brain, settings=settings, bus=bus)
+        results = await reviewer.sweep()
+
+        assert len(results) == 1
+        assert results[0].result == "failure"
+        brain.review.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Task 15: main.py wiring
+# ---------------------------------------------------------------------------
+
+
+class TestMainWiring:
+    """Verify DecisionReviewer is importable and wirable from main."""
+
+    def test_decision_reviewer_importable(self):
+        """DecisionReviewer should be importable from handlers module."""
+        from nous.handlers.decision_reviewer import DecisionReviewer
+
+        assert DecisionReviewer is not None
+
+    def test_brain_has_get_episode_for_decision(self):
+        """Brain should have get_episode_for_decision method."""
+        from nous.brain.brain import Brain
+
+        assert hasattr(Brain, "get_episode_for_decision")
+        assert callable(getattr(Brain, "get_episode_for_decision"))
