@@ -84,6 +84,7 @@ class DecisionSummary(BaseModel):
     pattern: str | None = None
     tags: list[str] = []
     score: float | None = None  # Relevance score from search
+    reviewed_at: datetime | None = None
     created_at: datetime
 
 
