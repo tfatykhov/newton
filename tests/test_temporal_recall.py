@@ -1,10 +1,11 @@
-"""Tests for temporal recall — spec 008.6 Phases 1-2.
+"""Tests for temporal recall — spec 008.6 Phases 1-3.
 
 Covers the list_recent() fix (active filter → ended_at filter),
 the new `hours` parameter for time-windowed episode listing,
-config toggle, and temporal context tier.
+config toggle, temporal context tier, and recall_recent tool.
 
-5 tests in TestListRecentFix, 2 in TestTemporalConfig, 4 in TestTemporalContextTier.
+5 tests in TestListRecentFix, 2 in TestTemporalConfig, 4 in TestTemporalContextTier,
+4 tests in TestRecallRecentTool.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -391,3 +392,84 @@ class TestTemporalContextTier:
 
         # The unique semantic episode should still appear
         assert "Only in semantic search" in result.system_prompt
+
+
+# ---------------------------------------------------------------------------
+# TestRecallRecentTool (Phase 3, Task 4)
+# ---------------------------------------------------------------------------
+
+
+class TestRecallRecentTool:
+    """recall_recent tool returns time-ordered episodes."""
+
+    @pytest.mark.asyncio
+    async def test_recall_recent_returns_formatted_episodes(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from nous.heart.schemas import EpisodeSummary
+        from nous.api.tools import create_nous_tools
+        from datetime import datetime, UTC
+        from uuid import uuid4
+
+        mock_brain = MagicMock()
+        mock_heart = MagicMock()
+        episodes = [
+            EpisodeSummary(
+                id=uuid4(), title="Ski Trip Planning",
+                summary="Budget for Breckenridge", outcome="success",
+                started_at=datetime(2026, 2, 28, 12, 24, tzinfo=UTC), tags=["travel"],
+            ),
+            EpisodeSummary(
+                id=uuid4(), title="Code Review",
+                summary="Reviewed PR #81", outcome="success",
+                started_at=datetime(2026, 2, 28, 11, 0, tzinfo=UTC), tags=["dev"],
+            ),
+        ]
+        mock_heart.list_episodes = AsyncMock(return_value=episodes)
+
+        tools = create_nous_tools(mock_brain, mock_heart)
+        result = await tools["recall_recent"](hours=48, limit=10)
+
+        text = result["content"][0]["text"]
+        assert "Ski Trip Planning" in text
+        assert "Code Review" in text
+        assert "Feb 28" in text
+
+    @pytest.mark.asyncio
+    async def test_recall_recent_empty(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from nous.api.tools import create_nous_tools
+
+        mock_brain = MagicMock()
+        mock_heart = MagicMock()
+        mock_heart.list_episodes = AsyncMock(return_value=[])
+
+        tools = create_nous_tools(mock_brain, mock_heart)
+        result = await tools["recall_recent"](hours=48, limit=10)
+
+        text = result["content"][0]["text"]
+        assert "No episodes" in text
+
+    @pytest.mark.asyncio
+    async def test_recall_recent_passes_hours_and_limit(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from nous.api.tools import create_nous_tools
+
+        mock_brain = MagicMock()
+        mock_heart = MagicMock()
+        mock_heart.list_episodes = AsyncMock(return_value=[])
+
+        tools = create_nous_tools(mock_brain, mock_heart)
+        await tools["recall_recent"](hours=72, limit=5)
+
+        mock_heart.list_episodes.assert_called_once_with(limit=5, hours=72)
+
+    def test_recall_recent_in_frame_tools(self):
+        from nous.api.runner import FRAME_TOOLS
+
+        for frame, tools in FRAME_TOOLS.items():
+            if frame == "initiation":
+                assert "recall_recent" not in tools
+            elif tools == ["*"]:
+                pass  # task frame includes all
+            else:
+                assert "recall_recent" in tools, f"recall_recent missing from {frame}"

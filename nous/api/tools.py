@@ -393,11 +393,48 @@ def create_nous_tools(brain: Brain, heart: Heart) -> dict[str, Any]:
             logger.exception("create_censor tool failed")
             return {"content": [{"type": "text", "text": f"Error creating censor: {e}"}]}
 
+    async def recall_recent(
+        hours: int = 48,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Recall recent episodes by time, not topic similarity.
+
+        Use this when the user asks "what did we talk about", "what happened
+        recently", or you need a comprehensive overview of recent activity.
+
+        Args:
+            hours: Look back this many hours (default 48)
+            limit: Maximum episodes to return (default 10)
+
+        Returns:
+            MCP-compliant response with time-ordered episode list
+        """
+        try:
+            episodes = await heart.list_episodes(limit=limit, hours=hours)
+
+            if not episodes:
+                return {"content": [{"type": "text", "text": f"No episodes found in the last {hours} hours."}]}
+
+            lines = [f"Recent episodes (last {hours}h):"]
+            for e in episodes:
+                title = e.title or (e.summary[:60] if e.summary else "Untitled")
+                time_str = e.started_at.strftime("%b %d %H:%M")
+                lines.append(f"- [{time_str}] {title}")
+                if e.summary and e.summary != e.title:
+                    lines.append(f"  {e.summary[:150]}")
+
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+
+        except Exception as e:
+            logger.exception("recall_recent tool failed")
+            return {"content": [{"type": "text", "text": f"Error fetching recent episodes: {e}"}]}
+
     return {
         "record_decision": record_decision,
         "learn_fact": learn_fact,
         "recall_deep": recall_deep,
         "create_censor": create_censor,
+        "recall_recent": recall_recent,
     }
 
 
@@ -540,6 +577,24 @@ _CREATE_CENSOR_SCHEMA: dict[str, Any] = {
     "required": ["trigger_pattern", "reason"],
 }
 
+_RECALL_RECENT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Recall recent episodes by time (not topic similarity). Use when the user asks what you discussed recently or you need a temporal overview.",
+    "properties": {
+        "hours": {
+            "type": "integer",
+            "description": "Look back this many hours (default 48)",
+            "default": 48,
+        },
+        "limit": {
+            "type": "integer",
+            "description": "Maximum episodes to return (default 10)",
+            "default": 10,
+        },
+    },
+    "required": [],
+}
+
 
 def register_nous_tools(dispatcher: ToolDispatcher, brain: Brain, heart: Heart) -> None:
     """Create Nous memory tools and register them with the dispatcher.
@@ -553,3 +608,4 @@ def register_nous_tools(dispatcher: ToolDispatcher, brain: Brain, heart: Heart) 
     dispatcher.register("learn_fact", closures["learn_fact"], _LEARN_FACT_SCHEMA)
     dispatcher.register("recall_deep", closures["recall_deep"], _RECALL_DEEP_SCHEMA)
     dispatcher.register("create_censor", closures["create_censor"], _CREATE_CENSOR_SCHEMA)
+    dispatcher.register("recall_recent", closures["recall_recent"], _RECALL_RECENT_SCHEMA)
