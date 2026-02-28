@@ -532,6 +532,30 @@ class TestTemporalRecencyWiring:
         # Conversation frame normally has episodes=0, but temporal boost should override
         assert plan.budget_overrides.get("episodes", 0) > 0
 
+    def test_bare_recap_without_temporal_words_still_boosts(self):
+        """Bare 'recap' or 'catch me up' should trigger budget boost even without temporal words."""
+        from nous.cognitive.layer import _is_recap_query
+        from nous.cognitive.intent import IntentClassifier
+        from nous.cognitive.schemas import FrameSelection
+
+        # "recap" has no temporal signal words like "recently"
+        assert _is_recap_query("recap") is True
+
+        classifier = IntentClassifier()
+        frame = FrameSelection(
+            frame_id="conversation", frame_name="Conversation",
+            confidence=1.0, match_method="pattern",
+        )
+        signals = classifier.classify("recap", frame)
+        # Without the layer.py fix, temporal_recency would be 0.0
+        # The fix in layer.py sets it to 0.8 for recap queries
+        # We can't test layer.py wiring here (needs full CognitiveLayer),
+        # but we verify the intent signal behavior:
+        # With temporal_recency set to 0.8, plan_retrieval should boost
+        signals.temporal_recency = 0.8  # Simulates what layer.py does
+        plan = classifier.plan_retrieval(signals, input_text="recap")
+        assert plan.budget_overrides.get("episodes", 0) > 0
+
 
 # ---------------------------------------------------------------------------
 # TestBudgetBoost (Phase 4, Task 6)

@@ -218,7 +218,12 @@ class CognitiveLayer:
         plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
         # 008.6: Detect recap queries and set temporal boost
-        _temporal_boost = _is_recap_query(user_input) or signals.temporal_recency > 0.5
+        _is_recap = _is_recap_query(user_input)
+        _temporal_boost = _is_recap or signals.temporal_recency > 0.5
+        # 008.6: Ensure budget boost fires even for bare recap queries without temporal words
+        if _is_recap and signals.temporal_recency <= 0.5:
+            signals.temporal_recency = 0.8
+            plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
         # 3. RECALL — build context (or initiation prompt)
         system_prompt = ""

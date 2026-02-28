@@ -148,10 +148,12 @@ class IntentClassifier:
         # F20: Short non-question input short-circuit
         # Inputs with no extractable keywords, no memory hints, and not a question
         # are likely short acknowledgements ("ok", "yes", "thanks") -- skip retrieval
+        # 008.6: Don't skip if temporal recency is high (recap queries)
         if (
             not signals.is_question
             and not signals.memory_type_hints
             and not signals.topic_keywords
+            and signals.temporal_recency <= 0.5
         ):
             return RetrievalPlan(
                 queries=[],
