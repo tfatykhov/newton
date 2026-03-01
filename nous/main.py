@@ -145,14 +145,19 @@ async def create_components(settings: Settings) -> dict:
             from nous.handlers.decision_reviewer import DecisionReviewer
 
             if settings.decision_review_enabled:
-                DecisionReviewer(brain, settings, bus, handler_http)
+                decision_reviewer = DecisionReviewer(brain, settings, bus, handler_http)
+            else:
+                decision_reviewer = None
         except ImportError:
+            decision_reviewer = None
             logger.debug("DecisionReviewer not available yet")
 
         # Start bus + monitor
         await bus.start()
         if session_monitor:
             await session_monitor.start()
+        if decision_reviewer:
+            await decision_reviewer.start()
 
     # Create tool dispatcher and register all tools
     dispatcher = ToolDispatcher()
@@ -217,6 +222,7 @@ async def create_components(settings: Settings) -> dict:
         "identity_manager": identity_manager,
         "subtask_pool": subtask_pool,
         "task_scheduler": task_scheduler,
+        "decision_reviewer": decision_reviewer,
     }
 
 
@@ -231,6 +237,11 @@ async def shutdown_components(components: dict) -> None:
     task_scheduler = components.get("task_scheduler")
     if task_scheduler:
         await task_scheduler.stop()
+
+    # 009.5: Stop decision reviewer
+    decision_reviewer = components.get("decision_reviewer")
+    if decision_reviewer:
+        await decision_reviewer.stop()
 
     # 006: Stop session monitor and event bus first
     session_monitor = components.get("session_monitor")

@@ -1,6 +1,6 @@
 """Decision Review Loop — auto-reviews decisions with verifiable outcomes.
 
-Listens to: session_ended
+Listens to: session_ended + periodic sweep
 Tier 1: Signal-based auto-review (Error, Episode, FileExists, GitHub)
 
 Part of spec 008.5.
@@ -8,6 +8,7 @@ Part of spec 008.5.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -216,7 +217,40 @@ class DecisionReviewer:
                 GitHubSignal(http_client, settings.github_token)
             )
 
+        self._sweep_task: asyncio.Task | None = None
+
         bus.on("session_ended", self.handle)
+
+    async def start(self) -> None:
+        """Start the periodic sweep loop."""
+        interval = getattr(self._settings, "decision_sweep_interval", 3600)
+        self._sweep_task = asyncio.create_task(
+            self._sweep_loop(interval), name="decision-review-sweep"
+        )
+        logger.info("Decision review sweep started (interval=%ds)", interval)
+
+    async def stop(self) -> None:
+        """Stop the periodic sweep loop."""
+        if self._sweep_task:
+            self._sweep_task.cancel()
+            try:
+                await self._sweep_task
+            except asyncio.CancelledError:
+                pass
+            self._sweep_task = None
+
+    async def _sweep_loop(self, interval: int) -> None:
+        """Periodic loop: sleep → sweep unreviewed decisions → repeat."""
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                results = await self.sweep()
+                if results:
+                    logger.info("Periodic sweep reviewed %d decision(s)", len(results))
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Periodic decision review sweep failed")
 
     async def handle(self, event: Event) -> None:
         """Review decisions from the ended session, then sweep older ones."""
