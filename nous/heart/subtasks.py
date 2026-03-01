@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from nous.storage.database import Database
 from nous.storage.models import Subtask
@@ -163,7 +163,7 @@ class SubtaskManager:
                 .where(Subtask.agent_id == self._agent_id)
                 .where(Subtask.status == "running")
                 .where(
-                    Subtask.started_at + func.make_interval(secs=Subtask.timeout_seconds) < now
+                    Subtask.started_at + Subtask.timeout_seconds * text("interval '1 second'") < now
                 )
                 .values(status="pending", worker_id=None, started_at=None)
             )
