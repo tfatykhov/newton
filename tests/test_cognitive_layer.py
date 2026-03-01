@@ -512,3 +512,48 @@ async def test_is_informational_new_patterns(cognitive, pattern):
     """Each new 009.5 pattern is detected as informational."""
     tr = _turn_result(pattern)
     assert cognitive._is_informational(tr) is True
+
+
+# ---------------------------------------------------------------------------
+# _is_action_report tests (009.5)
+# ---------------------------------------------------------------------------
+
+
+_TOOL_RESULTS = [ToolResult(tool_name="write_file", result="ok")]
+
+
+async def test_is_action_report_with_tools_and_markers(cognitive):
+    """Tools used + 2+ report markers in first 300 chars -> True."""
+    tr = _turn_result(
+        "Done. I created the migration file and updated the schema.",
+        tool_results=_TOOL_RESULTS,
+    )
+    assert cognitive._is_action_report(tr) is True
+
+
+async def test_is_action_report_no_tools(cognitive):
+    """No tool calls -> False regardless of markers."""
+    tr = _turn_result(
+        "Done. I created the migration file and updated the schema.",
+    )
+    assert cognitive._is_action_report(tr) is False
+
+
+async def test_is_action_report_one_marker(cognitive):
+    """Tools + only 1 marker -> False (threshold is 2)."""
+    tr = _turn_result(
+        "The file has been saved to disk.",
+        tool_results=_TOOL_RESULTS,
+    )
+    assert cognitive._is_action_report(tr) is False
+
+
+async def test_is_informational_delegates_to_action_report(cognitive):
+    """_is_informational returns True when _is_action_report fires."""
+    tr = _turn_result(
+        "I pushed the changes and merged the PR successfully.",
+        tool_results=_TOOL_RESULTS,
+    )
+    # This text doesn't match any keyword pattern, but has 2+ action markers
+    # ("pushed", "merged") with tool results, so _is_action_report catches it
+    assert cognitive._is_informational(tr) is True
