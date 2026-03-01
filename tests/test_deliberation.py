@@ -150,10 +150,10 @@ async def test_should_deliberate_decision(delib):
 
 
 async def test_should_deliberate_task(delib):
-    """Task frame triggers deliberation."""
+    """Task frame does NOT trigger deliberation (009.5)."""
     frame = _frame("task", frame_name="Task Execution")
     result = await delib.should_deliberate(frame)
-    assert result is True
+    assert result is False
 
 
 # ---------------------------------------------------------------------------

@@ -17,8 +17,8 @@ from nous.cognitive.schemas import FrameSelection
 
 logger = logging.getLogger(__name__)
 
-# Frames that trigger deliberation (D8)
-_DELIBERATION_FRAMES = {"decision", "task", "debug"}
+# Frames that trigger deliberation (D8, 009.5: removed task)
+_DELIBERATION_FRAMES = {"decision", "debug"}
 
 
 class DeliberationEngine:
@@ -125,7 +125,7 @@ class DeliberationEngine:
     async def should_deliberate(self, frame: FrameSelection) -> bool:
         """Should this frame trigger deliberation?
 
-        Returns True for: decision, task, debug (D8)
-        Returns False for: conversation, question, creative
+        Returns True for: decision, debug (D8, 009.5: removed task)
+        Returns False for: task, conversation, question, creative
         """
         return frame.frame_id in _DELIBERATION_FRAMES
