@@ -56,3 +56,9 @@ CREATE INDEX IF NOT EXISTS idx_schedules_next
     ON heart.schedules (next_fire_at) WHERE active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_schedules_agent
     ON heart.schedules (agent_id) WHERE active = TRUE;
+
+-- Result delivery tracking
+ALTER TABLE heart.subtasks ADD COLUMN IF NOT EXISTS delivered BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_subtasks_undelivered
+    ON heart.subtasks (parent_session_id, created_at)
+    WHERE status IN ('completed', 'failed') AND delivered = FALSE;
