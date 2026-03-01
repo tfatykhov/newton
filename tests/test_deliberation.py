@@ -233,3 +233,44 @@ async def test_get_recent_decisions_filters_by_session(brain, session):
     )
     assert len(results) == 1
     assert results[0].id == detail_b.id
+
+
+# ---------------------------------------------------------------------------
+# 10. test_start_dedup_blocks_duplicate (009.5 Task 5)
+# ---------------------------------------------------------------------------
+
+
+async def test_start_dedup_blocks_duplicate(delib, brain, session):
+    """009.5: start() returns None when a similar decision was recently recorded."""
+    frame = _frame()
+    id1 = await delib.start(
+        "nous-default", "evaluate database options", frame,
+        session_id="test-session", session=session,
+    )
+    assert id1 is not None
+
+    id2 = await delib.start(
+        "nous-default", "evaluate database options", frame,
+        session_id="test-session", session=session,
+    )
+    assert id2 is None
+
+
+# ---------------------------------------------------------------------------
+# 11. test_start_dedup_allows_different (009.5 Task 5)
+# ---------------------------------------------------------------------------
+
+
+async def test_start_dedup_allows_different(delib, brain, session):
+    """009.5: start() allows decisions with different descriptions."""
+    frame = _frame()
+    await delib.start(
+        "nous-default", "evaluate database options", frame,
+        session_id="test-session", session=session,
+    )
+
+    id2 = await delib.start(
+        "nous-default", "choose frontend framework for dashboard", frame,
+        session_id="test-session", session=session,
+    )
+    assert id2 is not None

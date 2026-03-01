@@ -7,18 +7,27 @@ providing a clean start -> think -> finalize flow.
 from __future__ import annotations
 
 import logging
+import re
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nous.brain.brain import Brain
 from nous.brain.schemas import ReasonInput, RecordInput
 from nous.cognitive.schemas import FrameSelection
+from nous.storage.models import Decision as DecisionModel
 
 logger = logging.getLogger(__name__)
 
 # Frames that trigger deliberation (D8, 009.5: removed task)
 _DELIBERATION_FRAMES = {"decision", "debug"}
+
+# 009.5: Dedup constants
+_DEDUP_WINDOW_MINUTES = 5
+_DEDUP_EMBEDDING_THRESHOLD = 0.85
+_DEDUP_KEYWORD_THRESHOLD = 0.5
 
 
 class DeliberationEngine:
@@ -36,9 +45,12 @@ class DeliberationEngine:
         agent_id: str,
         description: str,
         frame: FrameSelection,
+        session_id: str | None = None,
         session: AsyncSession | None = None,
-    ) -> str:
-        """Begin deliberation -- record intent, return decision_id as string.
+    ) -> str | None:
+        """Begin deliberation -- with dedup check (009.5).
+
+        Returns decision_id as string, or None if duplicate detected.
 
         Creates a decision via Brain.record() with:
         - description: "Plan: {description}"
@@ -51,6 +63,13 @@ class DeliberationEngine:
         P1-2: Constructs RecordInput pydantic model.
         P2-6: Returns str(uuid) for TurnContext storage.
         """
+        # 009.5: Dedup check before creating decision
+        if session_id and await self._is_duplicate(
+            agent_id, description, session_id, session=session,
+        ):
+            logger.debug("Skipping duplicate deliberation: %s", description[:80])
+            return None
+
         # P1-2: Build RecordInput with at least 1 reason
         record_input = RecordInput(
             description=f"Plan: {description}",
@@ -64,6 +83,7 @@ class DeliberationEngine:
                     text=f"Frame '{frame.frame_name}' triggered deliberation for: {description[:100]}",
                 )
             ],
+            session_id=session_id,
         )
 
         detail = await self._brain.record(record_input, session=session)
@@ -129,3 +149,77 @@ class DeliberationEngine:
         Returns False for: task, conversation, question, creative
         """
         return frame.frame_id in _DELIBERATION_FRAMES
+
+    # ------------------------------------------------------------------
+    # 009.5: Dedup helpers
+    # ------------------------------------------------------------------
+
+    async def _is_duplicate(
+        self,
+        agent_id: str,
+        description: str,
+        session_id: str,
+        session: AsyncSession | None = None,
+    ) -> bool:
+        """Check if a similar decision was recorded recently (009.5).
+
+        Uses embedding similarity (0.85) with keyword fallback (0.5).
+        Session-scoped to prevent cross-session suppression.
+        """
+        cutoff = datetime.now(UTC) - timedelta(minutes=_DEDUP_WINDOW_MINUTES)
+        recent = await self._brain.get_recent_decisions(
+            agent_id, since=cutoff, session_id=session_id, session=session,
+        )
+        if not recent:
+            return False
+
+        # Try embedding-based comparison
+        if self._brain.embeddings:
+            try:
+                desc_embedding = await self._brain.embeddings.embed(description)
+                for decision in recent:
+                    stored = await self._get_decision_embedding(decision.id, session=session)
+                    if stored is not None:
+                        sim = self._cosine_similarity(desc_embedding, stored)
+                        if sim > _DEDUP_EMBEDDING_THRESHOLD:
+                            return True
+                return False
+            except Exception:
+                logger.debug("Embedding dedup failed, falling back to keyword overlap")
+
+        # Fallback: keyword containment coefficient
+        desc_words = set(re.findall(r"\b\w{3,}\b", description.lower()))
+        for decision in recent:
+            existing_words = set(re.findall(r"\b\w{3,}\b", decision.description.lower()))
+            if not desc_words or not existing_words:
+                continue
+            intersection = desc_words & existing_words
+            overlap = len(intersection) / min(len(desc_words), len(existing_words))
+            if overlap > _DEDUP_KEYWORD_THRESHOLD:
+                return True
+        return False
+
+    async def _get_decision_embedding(
+        self, decision_id: UUID, session: AsyncSession | None = None,
+    ) -> list[float] | None:
+        """Fetch stored embedding for a decision."""
+        if session is None:
+            async with self._brain.db.session() as session:
+                result = await session.execute(
+                    sa_select(DecisionModel.embedding).where(DecisionModel.id == decision_id)
+                )
+                return result.scalar_one_or_none()
+        result = await session.execute(
+            sa_select(DecisionModel.embedding).where(DecisionModel.id == decision_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)

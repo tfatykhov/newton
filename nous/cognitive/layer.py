@@ -333,7 +333,10 @@ class CognitiveLayer:
         decision_id: str | None = None
         try:
             if await self._deliberation.should_deliberate(frame):
-                decision_id = await self._deliberation.start(agent_id, user_input[:200], frame, session=session)
+                decision_id = await self._deliberation.start(
+                    agent_id, user_input[:200], frame,
+                    session_id=session_id, session=session,
+                )
         except Exception:
             logger.warning("Deliberation start failed, continuing without decision_id")
             decision_id = None
