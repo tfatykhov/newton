@@ -153,6 +153,31 @@ class SubtaskManager:
             result = await session.execute(q)
             return list(result.scalars().all())
 
+    async def get_undelivered(self, parent_session_id: str) -> list[Subtask]:
+        """Get completed/failed subtasks not yet delivered to parent session."""
+        async with self._db.session() as session:
+            result = await session.execute(
+                select(Subtask)
+                .where(Subtask.agent_id == self._agent_id)
+                .where(Subtask.parent_session_id == parent_session_id)
+                .where(Subtask.status.in_(["completed", "failed"]))
+                .where(Subtask.delivered.is_(False))
+                .order_by(Subtask.completed_at)
+            )
+            return list(result.scalars().all())
+
+    async def mark_delivered(self, subtask_ids: list[UUID]) -> None:
+        """Mark subtasks as delivered to parent session."""
+        if not subtask_ids:
+            return
+        async with self._db.session() as session:
+            await session.execute(
+                update(Subtask)
+                .where(Subtask.id.in_(subtask_ids))
+                .values(delivered=True)
+            )
+            await session.commit()
+
     async def reclaim_stale(self) -> int:
         """Re-enqueue running subtasks that exceeded their timeout."""
         async with self._db.session() as session:
