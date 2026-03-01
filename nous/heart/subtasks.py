@@ -1,5 +1,7 @@
 """Subtask queue manager -- CRUD and atomic dequeue for background tasks."""
 
+from __future__ import annotations
+
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
