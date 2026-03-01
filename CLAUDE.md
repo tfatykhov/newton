@@ -196,6 +196,16 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | `NOUS_SESSION_TIMEOUT` | `1800` | Session idle timeout in seconds |
 | `NOUS_SLEEP_TIMEOUT` | `7200` | Sleep mode timeout in seconds |
 | `NOUS_SLEEP_CHECK_INTERVAL` | `60` | Sleep check interval in seconds |
+| `NOUS_SUBTASK_ENABLED` | `true` | Enable subtask worker pool |
+| `NOUS_SUBTASK_WORKERS` | `2` | Number of async worker tasks |
+| `NOUS_SUBTASK_POLL_INTERVAL` | `2.0` | Seconds between queue polls |
+| `NOUS_SUBTASK_DEFAULT_TIMEOUT` | `120` | Default subtask timeout (seconds) |
+| `NOUS_SUBTASK_MAX_TIMEOUT` | `600` | Maximum allowed timeout |
+| `NOUS_SUBTASK_MAX_CONCURRENT` | `3` | Max concurrent subtasks |
+| `NOUS_SCHEDULE_ENABLED` | `true` | Enable task scheduler |
+| `NOUS_SCHEDULE_CHECK_INTERVAL` | `60` | Seconds between schedule checks |
+| `NOUS_TELEGRAM_BOT_TOKEN` | — | Telegram bot token for subtask notifications |
+| `NOUS_TELEGRAM_CHAT_ID` | — | Telegram chat ID for subtask notifications |
 
 ### REST Endpoints
 
@@ -213,6 +223,12 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | GET | `/frames` | Available cognitive frames |
 | GET | `/calibration` | Calibration report |
 | GET | `/health` | Health check |
+| GET | `/subtasks` | List subtasks |
+| GET | `/subtasks/{id}` | Subtask detail |
+| DELETE | `/subtasks/{id}` | Cancel a subtask |
+| GET | `/schedules` | List schedules |
+| POST | `/schedules` | Create a schedule |
+| DELETE | `/schedules/{id}` | Deactivate a schedule |
 
 ### Agent Tools
 
@@ -225,6 +241,10 @@ DB connection vars are **unprefixed** (shared with docker-compose). All others u
 | `bash` | task, debug, conversation, question | Execute shell commands |
 | `read_file` | task, debug, question | Read file contents |
 | `write_file` | task, creative | Write/create files |
+| `spawn_task` | conversation, debug | Spawn a background subtask |
+| `schedule_task` | conversation, debug | Schedule a recurring/one-shot task |
+| `list_tasks` | conversation, question, decision, debug | List subtasks and schedules |
+| `cancel_task` | conversation, question, decision, debug | Cancel a subtask or schedule |
 | `web_search` | all | Search via Brave API |
 | `web_fetch` | all | Fetch and extract web content |
 
