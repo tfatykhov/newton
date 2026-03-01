@@ -21,7 +21,7 @@
 ### P1: Capabilities
 | Feature | Name | Status | Description |
 |---------|------|--------|-------------|
-| F009 | [Async Subtasks](F009-async-subtasks.md) | Planned | Background task queue — parallel execution, non-blocking chat, Postgres-backed workers |
+| F009 | [Async Subtasks](F009-async-subtasks.md) | ✅ Shipped | Background task queue — parallel execution, non-blocking chat, Postgres-backed workers, scheduled/recurring tasks |
 | F010 | [Memory Improvements](F010-memory-improvements.md) | ✅ Shipped | Episode summaries, clean decision descriptions, proactive fact learning, user-tagged episodes |
 
 ### P0: Identity & Context
@@ -75,6 +75,7 @@ All shipped implementation specs with PR references:
 | — | RRF Score Fix | ✅ Shipped | #64 — use original hybrid scores instead of RRF ranking |
 | — | Query Deduplication Fix | ✅ Shipped | — prevent doubled query when topic = input |
 | — | Tier 3 Threshold Tuning | ✅ Shipped | #66 — decision threshold 0.3→0.20 |
+| 011.1 | Subtasks & Scheduling | ✅ Shipped | #85 — F009: subtask queue, worker pool, scheduling, time parser, 4 tools, 6 endpoints |
 
 ### Phase 2 — Quality (next to build)
 
@@ -109,9 +110,9 @@ All shipped implementation specs with PR references:
 
 - **Total source:** ~32,800 lines of Python
 - **Test count:** 857 tests across 46 test files
-- **Database:** 16 tables across 2 schemas (brain, heart)
-- **Tools:** 10 agent tools (record_decision, recall_deep, learn_fact, create_censor, store_identity, complete_initiation, bash, read_file, write_file, web_search, web_fetch)
-- **Endpoints:** 17 REST endpoints + MCP server + Telegram bot
+- **Database:** 18 tables across 2 schemas (brain, heart)
+- **Tools:** 14 agent tools (record_decision, recall_deep, learn_fact, create_censor, store_identity, complete_initiation, spawn_task, schedule_task, list_tasks, cancel_task, bash, read_file, write_file, web_search, web_fetch)
+- **Endpoints:** 23 REST endpoints + MCP server + Telegram bot
 - **Feature specs:** 14 feature docs + 17 research notes
 - **Voice:** 3 communication procedures (email, Telegram, A2A) + 2 censors
 
@@ -145,4 +146,4 @@ All shipped implementation specs with PR references:
 | Schema | Tables | Purpose |
 |--------|--------|---------|
 | `brain` (8) | decisions, decision_tags, decision_reasons, decision_bridge, thoughts, graph_edges, guardrails, calibration_snapshots | Decision intelligence |
-| `heart` (8) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory, conversation_state | Memory system |
+| `heart` (10) | episodes, episode_decisions, episode_procedures, facts, procedures, censors, working_memory, conversation_state, subtasks, schedules | Memory system |
