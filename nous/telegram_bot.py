@@ -443,9 +443,17 @@ class NousTelegramBot:
             await self._send(chat_id, "🧠 *Nous* is ready\\. Send me a message\\!", parse_mode="MarkdownV2")
             return
 
-        # Handle /new - reset session
+        # Handle /new - end current session properly, then start fresh
         if text == "/new":
-            self._sessions.pop(chat_id, None)
+            old_session_id = self._sessions.pop(chat_id, None)
+            if old_session_id:
+                try:
+                    await self._http.delete(
+                        f"{self.nous_url}/chat/{old_session_id}",
+                        timeout=10,
+                    )
+                except Exception:
+                    logger.warning("Failed to end session %s via API", old_session_id)
             await self._send(chat_id, "🔄 New session started.")
             return
 
