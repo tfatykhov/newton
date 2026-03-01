@@ -764,9 +764,12 @@ def create_subtask_tools(heart: Heart, settings: "Settings") -> dict[str, Any]:
             if subtasks:
                 lines.append("=== Subtasks ===")
                 for st in subtasks:
-                    lines.append(
-                        f"- [{st.status}] {st.id} | {st.task[:80]}"
-                    )
+                    line = f"- [{st.status}] {st.id} | {st.task[:80]}"
+                    if st.status == "completed" and st.result:
+                        line += f"\n  Result: {st.result[:500]}"
+                    elif st.status == "failed" and st.error:
+                        line += f"\n  Error: {st.error[:300]}"
+                    lines.append(line)
             else:
                 lines.append("=== Subtasks ===\nNo subtasks found.")
 
