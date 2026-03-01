@@ -33,6 +33,17 @@ services:
       - NOUS_SLEEP_TIMEOUT=${NOUS_SLEEP_TIMEOUT:-7200}
       - NOUS_SLEEP_CHECK_INTERVAL=${NOUS_SLEEP_CHECK_INTERVAL:-60}
       - NOUS_IDENTITY_PROMPT=${NOUS_IDENTITY_PROMPT:-}
+      # Subtasks & Scheduling
+      - NOUS_SUBTASK_ENABLED=${NOUS_SUBTASK_ENABLED:-true}
+      - NOUS_SUBTASK_WORKERS=${NOUS_SUBTASK_WORKERS:-2}
+      - NOUS_SUBTASK_POLL_INTERVAL=${NOUS_SUBTASK_POLL_INTERVAL:-2}
+      - NOUS_SUBTASK_DEFAULT_TIMEOUT=${NOUS_SUBTASK_DEFAULT_TIMEOUT:-120}
+      - NOUS_SUBTASK_MAX_TIMEOUT=${NOUS_SUBTASK_MAX_TIMEOUT:-600}
+      - NOUS_SUBTASK_MAX_CONCURRENT=${NOUS_SUBTASK_MAX_CONCURRENT:-3}
+      - NOUS_SCHEDULE_ENABLED=${NOUS_SCHEDULE_ENABLED:-true}
+      - NOUS_SCHEDULE_CHECK_INTERVAL=${NOUS_SCHEDULE_CHECK_INTERVAL:-60}
+      - NOUS_TELEGRAM_BOT_TOKEN=${NOUS_TELEGRAM_BOT_TOKEN:-}
+      - NOUS_TELEGRAM_CHAT_ID=${NOUS_TELEGRAM_CHAT_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +60,7 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/001-init.sql
       - ./sql/seed.sql:/docker-entrypoint-initdb.d/002-seed.sql
+      - ./sql/migrations/010_subtasks.sql:/docker-entrypoint-initdb.d/003-subtasks.sql
     ports:
       - "${DB_PORT:-5432}:5432"
     healthcheck:
