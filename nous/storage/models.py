@@ -41,9 +41,9 @@ class Agent(Base):
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     is_initiated: Mapped[bool | None] = mapped_column(Boolean, server_default="false")
-    last_active: Mapped[datetime | None] = mapped_column()
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    last_active: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     frames: Mapped[list["Frame"]] = relationship(back_populates="agent")
@@ -59,7 +59,7 @@ class AgentIdentity(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_by: Mapped[str | None] = mapped_column(String(50))
     previous_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("nous_system.agent_identity.id"))
 
@@ -82,7 +82,7 @@ class Frame(Base):
     usage_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     agent: Mapped["Agent | None"] = relationship(back_populates="frames")
@@ -97,7 +97,7 @@ class Event(Base):
     session_id: Mapped[str | None] = mapped_column(String(100))
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # =============================================================================
@@ -139,8 +139,8 @@ class Decision(Base):
     reviewer: Mapped[str | None] = mapped_column(String(50))
     embedding = mapped_column(Vector(1536), nullable=True)
     # search_tsv is GENERATED ALWAYS — do not map, read-only DB-side
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     tags: Mapped[list["DecisionTag"]] = relationship(back_populates="decision", cascade="all, delete-orphan")
@@ -185,7 +185,7 @@ class DecisionReason(Base):
     )
     type: Mapped[str] = mapped_column(String(50), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     decision: Mapped["Decision"] = relationship(back_populates="reasons")
@@ -219,7 +219,7 @@ class Thought(Base):
     )
     agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     decision: Mapped["Decision"] = relationship(back_populates="thoughts")
@@ -250,7 +250,7 @@ class GraphEdge(Base):
     relation: Mapped[str] = mapped_column(String(50), nullable=False)
     weight: Mapped[float | None] = mapped_column(Float, server_default="1.0")
     auto_linked: Mapped[bool | None] = mapped_column(Boolean, server_default="false")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Guardrail(Base):
@@ -274,7 +274,7 @@ class Guardrail(Base):
     activation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     last_activated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CalibrationSnapshot(Base):
@@ -291,7 +291,7 @@ class CalibrationSnapshot(Base):
     confidence_stddev: Mapped[float | None] = mapped_column(Float)
     category_stats: Mapped[dict | None] = mapped_column(JSONB)
     reason_stats: Mapped[dict | None] = mapped_column(JSONB)
-    snapshot_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    snapshot_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 # =============================================================================
@@ -332,7 +332,7 @@ class Episode(Base):
     structured_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     user_display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     episode_decisions: Mapped[list["EpisodeDecision"]] = relationship(
@@ -376,7 +376,7 @@ class Fact(Base):
     source: Mapped[str | None] = mapped_column(String(500))
     source_episode_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.episodes.id"))
     source_decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("brain.decisions.id"))
-    learned_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    learned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_confirmed: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     confirmation_count: Mapped[int | None] = mapped_column(Integer, server_default="0")
     superseded_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("heart.facts.id"))
@@ -387,8 +387,8 @@ class Fact(Base):
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     encoded_frame: Mapped[str | None] = mapped_column(String(100))
     encoded_censors = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     source_episode: Mapped["Episode | None"] = relationship(foreign_keys=[source_episode_id])
@@ -424,8 +424,8 @@ class Procedure(Base):
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
     encoded_frame: Mapped[str | None] = mapped_column(String(100))
     encoded_censors = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     episode_procedures: Mapped[list["EpisodeProcedure"]] = relationship(
@@ -492,8 +492,8 @@ class Censor(Base):
     escalation_threshold: Mapped[int | None] = mapped_column(Integer, server_default="3")
     embedding = mapped_column(Vector(1536), nullable=True)
     active: Mapped[bool | None] = mapped_column(Boolean, server_default="true")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     source_decision: Mapped["Decision | None"] = relationship(foreign_keys=[learned_from_decision])
@@ -515,8 +515,8 @@ class WorkingMemory(Base):
     items: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
     open_threads: Mapped[dict | None] = mapped_column(JSONB, server_default="[]")
     max_items: Mapped[int | None] = mapped_column(Integer, server_default="20")
-    created_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(server_default=func.now())
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ConversationState(Base):
@@ -533,8 +533,8 @@ class ConversationState(Base):
     messages: Mapped[dict | None] = mapped_column(JSONB)
     turn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     compaction_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -568,7 +568,7 @@ class Subtask(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="120")
     notify: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict] = mapped_column(
@@ -604,7 +604,7 @@ class Schedule(Base):
     max_fires: Mapped[int | None] = mapped_column(Integer)
     notify: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="120")
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     created_by_session: Mapped[str | None] = mapped_column(String(200))
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, server_default="{}"
