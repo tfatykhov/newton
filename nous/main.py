@@ -222,6 +222,7 @@ async def create_components(settings: Settings) -> dict:
         "identity_manager": identity_manager,
         "subtask_pool": subtask_pool,
         "task_scheduler": task_scheduler,
+        "decision_reviewer": decision_reviewer,
     }
 
 
@@ -236,6 +237,11 @@ async def shutdown_components(components: dict) -> None:
     task_scheduler = components.get("task_scheduler")
     if task_scheduler:
         await task_scheduler.stop()
+
+    # 009.5: Stop decision reviewer
+    decision_reviewer = components.get("decision_reviewer")
+    if decision_reviewer:
+        await decision_reviewer.stop()
 
     # 006: Stop session monitor and event bus first
     session_monitor = components.get("session_monitor")
