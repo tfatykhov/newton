@@ -49,7 +49,9 @@ class ToolDispatcher:
         self._handlers[name] = handler
         self._schemas[name] = schema
 
-    async def dispatch(self, name: str, args: dict[str, Any]) -> tuple[str, bool]:
+    async def dispatch(
+        self, name: str, args: dict[str, Any], session_id: str | None = None,
+    ) -> tuple[str, bool]:
         """Dispatch a tool call and return (result_text, is_error).
 
         P0-6 fix: Uses **kwargs unpacking for closures.
@@ -59,6 +61,8 @@ class ToolDispatcher:
         if not handler:
             return f"Unknown tool: {name}", True
         try:
+            if session_id is not None and name == "spawn_task":
+                args = {**args, "_session_id": session_id}
             result = await handler(**args)  # P0-6: **kwargs unpacking
             # P1-1: Extract text from MCP-format response
             return result["content"][0]["text"], False
@@ -628,6 +632,7 @@ def create_subtask_tools(heart: Heart, settings: "Settings") -> dict[str, Any]:
         priority: str = "normal",
         timeout: int | None = None,
         notify: bool = True,
+        _session_id: str | None = None,
     ) -> dict[str, Any]:
         """Spawn a background subtask for the worker pool.
 
@@ -650,6 +655,7 @@ def create_subtask_tools(heart: Heart, settings: "Settings") -> dict[str, Any]:
                 priority=priority,
                 timeout=effective_timeout,
                 notify=notify,
+                parent_session_id=_session_id,
             )
             return {
                 "content": [

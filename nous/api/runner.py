@@ -355,6 +355,7 @@ class AgentRunner:
                 system_prompt=system_prompt,
                 conversation=conversation,
                 frame_id=turn_context.frame.frame_id,
+                session_id=session_id,
             )
             conversation.messages.append(Message(role="assistant", content=response_text))
         except Exception as e:
@@ -820,7 +821,7 @@ class AgentRunner:
                     start_time = time.monotonic()
                     result_text, is_error = "", False
                     async for item in self._dispatch_with_keepalive(
-                        tc["name"], tc["input"]
+                        tc["name"], tc["input"], session_id=session_id
                     ):
                         if isinstance(item, StreamEvent):
                             yield item
@@ -899,6 +900,7 @@ class AgentRunner:
         system_prompt: str,
         conversation: Conversation,
         frame_id: str,
+        session_id: str | None = None,
     ) -> tuple[str, list[ToolResult], dict[str, int], list[str]]:
         """Run the tool use loop until completion or max_turns.
 
@@ -972,7 +974,7 @@ class AgentRunner:
 
                     start_time = time.monotonic()
                     result_text, is_error = await self._dispatcher.dispatch(
-                        tool_name, tool_input
+                        tool_name, tool_input, session_id=session_id
                     )
                     duration_ms = int((time.monotonic() - start_time) * 1000)
 
@@ -1244,7 +1246,7 @@ Rules:
                     pass
 
     async def _dispatch_with_keepalive(
-        self, name: str, args: dict[str, Any]
+        self, name: str, args: dict[str, Any], session_id: str | None = None,
     ) -> AsyncGenerator[StreamEvent | tuple[str, bool], None]:
         """Execute a tool, yielding keepalive events during long execution.
 
@@ -1257,7 +1259,7 @@ Rules:
 
         task = asyncio.create_task(
             asyncio.wait_for(
-                self._dispatcher.dispatch(name, args),
+                self._dispatcher.dispatch(name, args, session_id=session_id),
                 timeout=timeout,
             )
         )
