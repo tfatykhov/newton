@@ -132,15 +132,13 @@ class TestParseWhenNatural:
 
     def test_tomorrow_9am(self) -> None:
         """'tomorrow 9am' parses to tomorrow at 09:00 UTC."""
-        # Mock now to a known time so 'tomorrow' is deterministic
+        # Mock now to a known time so the parsed date is in the future
         fake_now = datetime(2099, 6, 15, 12, 0, 0, tzinfo=UTC)
         with patch("nous.handlers.time_parser.datetime") as mock_dt:
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-            # dateutil parses relative to real system time, so we just
-            # verify the function doesn't raise and returns aware dt.
-            # Use a far-future date for reliability.
-            result = parse_when("March 10 2099 9am")
+            # Use a date AFTER fake_now to avoid past-time rejection
+            result = parse_when("July 20 2099 9am")
         assert result.tzinfo is not None
         assert result.hour == 9
         assert result.year == 2099
