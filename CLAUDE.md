@@ -96,6 +96,8 @@ nous/
 | 005.5 | Noise reduction (frame instructions, decision filtering) | #20 |
 | 006 | Event Bus (async handlers, DB persistence) | — |
 | F010 | Memory improvements (episode summaries, fact extraction, user tagging) | #21 |
+| 011.1 | Subtasks & Scheduling (F009) | #85 |
+| 011.2 | Subtask Result Delivery (F009) | — |
 
 ## How to Work
 

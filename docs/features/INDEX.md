@@ -76,6 +76,7 @@ All shipped implementation specs with PR references:
 | — | Query Deduplication Fix | ✅ Shipped | — prevent doubled query when topic = input |
 | — | Tier 3 Threshold Tuning | ✅ Shipped | #66 — decision threshold 0.3→0.20 |
 | 011.1 | Subtasks & Scheduling | ✅ Shipped | #85 — F009: subtask queue, worker pool, scheduling, time parser, 4 tools, 6 endpoints |
+| 011.2 | Subtask Result Delivery | ✅ Shipped | — subtask results auto-injected into parent session context, skip_episode for workers, delivered tracking |
 
 ### Phase 2 — Quality (next to build)
 
