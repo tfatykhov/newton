@@ -495,3 +495,82 @@ class TestSubtaskWorkerPool:
         await pool._execute_subtask(dequeued)
 
         mock_http.post.assert_not_awaited()
+
+    async def test_execute_subtask_passes_system_prompt_prefix(
+        self, mock_runner, worker_heart, worker_settings, mock_bus
+    ):
+        """_execute_subtask passes system_prompt_prefix to run_turn."""
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            bus=mock_bus,
+        )
+
+        subtask = await worker_heart.subtasks.create(
+            task="Prefix test task",
+            parent_session_id="parent-sess-42",
+        )
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._execute_subtask(dequeued)
+
+        call_kwargs = mock_runner.run_turn.call_args.kwargs
+        assert "system_prompt_prefix" in call_kwargs
+        prefix = call_kwargs["system_prompt_prefix"]
+        assert "background subtask" in prefix
+        assert "Prefix test task" in prefix
+        assert "parent-sess-42" in prefix
+        assert "Do not ask questions" in prefix
+
+
+# ---------------------------------------------------------------------------
+# Integration tests (end-to-end)
+# ---------------------------------------------------------------------------
+
+
+class TestIntegration:
+    """End-to-end integration tests."""
+
+    async def test_full_subtask_lifecycle(self, db, settings):
+        """Create -> dequeue -> complete -> verify."""
+        heart = Heart(db, settings)
+        subtask = await heart.subtasks.create(
+            task="Integration test task", priority="urgent", timeout=60,
+        )
+        assert subtask.status == "pending"
+
+        dequeued = await heart.subtasks.dequeue("test-worker")
+        assert dequeued is not None
+        assert dequeued.id == subtask.id
+        assert dequeued.status == "running"
+
+        await heart.subtasks.complete(subtask.id, "Done!")
+        final = await heart.subtasks.get(subtask.id)
+        assert final.status == "completed"
+        assert final.result == "Done!"
+
+        counts = await heart.subtasks.count_by_status()
+        assert counts.get("completed", 0) >= 1
+        await heart.close()
+
+    async def test_full_schedule_lifecycle(self, db, settings):
+        """Create recurring -> fire -> advance -> verify."""
+        heart = Heart(db, settings)
+        schedule = await heart.schedules.create(
+            task="Recurring integration test",
+            schedule_type="recurring",
+            interval_seconds=3600,
+            max_fires=2,
+        )
+        now = datetime.now(UTC)
+        await heart.schedules.advance(schedule.id, now)
+        s1 = await heart.schedules.get(schedule.id)
+        assert s1.fire_count == 1
+        assert s1.active is True
+
+        await heart.schedules.advance(schedule.id, now + timedelta(hours=1))
+        s2 = await heart.schedules.get(schedule.id)
+        assert s2.fire_count == 2
+        assert s2.active is False  # max_fires reached
+        await heart.close()

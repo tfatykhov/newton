@@ -150,11 +150,19 @@ class SubtaskWorkerPool:
             subtask.task[:80],
         )
 
+        system_prefix = (
+            f"You are executing a background subtask.\n"
+            f"Task: {subtask.task}\n"
+            f"Parent session: {subtask.parent_session_id or 'none'}\n"
+            f"Deliver a clear, complete result. Do not ask questions.\n"
+        )
+
         try:
             response_text, _turn_ctx, _usage = await self._runner.run_turn(
                 session_id=session_id,
                 user_message=subtask.task,
                 agent_id=self._settings.agent_id,
+                system_prompt_prefix=system_prefix,
             )
 
             await self._heart.subtasks.complete(subtask.id, response_text)
