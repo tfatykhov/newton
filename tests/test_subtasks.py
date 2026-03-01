@@ -574,3 +574,168 @@ class TestIntegration:
         assert s2.fire_count == 2
         assert s2.active is False  # max_fires reached
         await heart.close()
+
+
+# ---------------------------------------------------------------------------
+# 011.2 — Subtask Result Delivery tests
+# ---------------------------------------------------------------------------
+
+from nous.cognitive.layer import _format_subtask_results
+
+
+class TestSubtaskDelivery:
+    """Tests for subtask result delivery (011.2): get_undelivered,
+    mark_delivered, and _format_subtask_results."""
+
+    async def test_delivered_column_defaults_false(self, session: AsyncSession):
+        subtask = Subtask(
+            agent_id="test-agent",
+            task="Check delivered default",
+            priority=100,
+            timeout_seconds=120,
+        )
+        session.add(subtask)
+        await session.flush()
+        assert subtask.delivered is False
+
+    async def test_get_undelivered_returns_completed_and_failed(
+        self, subtask_mgr: SubtaskManager,
+    ):
+        """get_undelivered returns completed/failed subtasks with delivered=False."""
+        parent_sid = "parent-session-delivery-test"
+
+        # Create subtasks with parent_session_id
+        s1 = await subtask_mgr.create(task="Task A", parent_session_id=parent_sid)
+        s2 = await subtask_mgr.create(task="Task B", parent_session_id=parent_sid)
+        s3 = await subtask_mgr.create(task="Task C", parent_session_id=parent_sid)
+
+        # Dequeue all
+        await subtask_mgr.dequeue("w-0")
+        await subtask_mgr.dequeue("w-1")
+        await subtask_mgr.dequeue("w-2")
+
+        # Complete s1, fail s2, leave s3 running
+        await subtask_mgr.complete(s1.id, "Result A")
+        await subtask_mgr.fail(s2.id, "Error B")
+
+        undelivered = await subtask_mgr.get_undelivered(parent_sid)
+        assert len(undelivered) == 2
+        task_names = {s.task for s in undelivered}
+        assert task_names == {"Task A", "Task B"}
+
+    async def test_get_undelivered_excludes_other_sessions(
+        self, subtask_mgr: SubtaskManager,
+    ):
+        """get_undelivered only returns subtasks for the given parent_session_id."""
+        s1 = await subtask_mgr.create(
+            task="Mine", parent_session_id="session-mine",
+        )
+        s2 = await subtask_mgr.create(
+            task="Theirs", parent_session_id="session-theirs",
+        )
+        await subtask_mgr.dequeue("w-0")
+        await subtask_mgr.dequeue("w-1")
+        await subtask_mgr.complete(s1.id, "Result mine")
+        await subtask_mgr.complete(s2.id, "Result theirs")
+
+        undelivered = await subtask_mgr.get_undelivered("session-mine")
+        assert len(undelivered) == 1
+        assert undelivered[0].task == "Mine"
+
+    async def test_get_undelivered_excludes_already_delivered(
+        self, subtask_mgr: SubtaskManager,
+    ):
+        """Already-delivered subtasks are not returned."""
+        parent_sid = "session-delivered-test"
+        s1 = await subtask_mgr.create(task="Already done", parent_session_id=parent_sid)
+        await subtask_mgr.dequeue("w-0")
+        await subtask_mgr.complete(s1.id, "Old result")
+
+        # Mark delivered
+        await subtask_mgr.mark_delivered([s1.id])
+
+        undelivered = await subtask_mgr.get_undelivered(parent_sid)
+        assert len(undelivered) == 0
+
+    async def test_mark_delivered_sets_flag(self, subtask_mgr: SubtaskManager):
+        """mark_delivered sets delivered=True on specified subtasks."""
+        parent_sid = "session-mark-test"
+        s1 = await subtask_mgr.create(task="Mark me", parent_session_id=parent_sid)
+        await subtask_mgr.dequeue("w-0")
+        await subtask_mgr.complete(s1.id, "Done")
+
+        await subtask_mgr.mark_delivered([s1.id])
+
+        updated = await subtask_mgr.get(s1.id)
+        assert updated.delivered is True
+
+    async def test_mark_delivered_empty_list(self, subtask_mgr: SubtaskManager):
+        """mark_delivered with empty list is a no-op."""
+        await subtask_mgr.mark_delivered([])  # should not raise
+
+    async def test_get_undelivered_empty_when_no_subtasks(
+        self, subtask_mgr: SubtaskManager,
+    ):
+        """get_undelivered returns empty list when no subtasks exist."""
+        undelivered = await subtask_mgr.get_undelivered("nonexistent-session")
+        assert undelivered == []
+
+
+class TestFormatSubtaskResults:
+    """Tests for _format_subtask_results helper."""
+
+    def _make_subtask(self, *, task, status, result=None, error=None, id_hex="abcdef01"):
+        """Create a mock subtask for formatting tests."""
+        s = MagicMock()
+        s.task = task
+        s.status = status
+        s.result = result
+        s.error = error
+        s.id = MagicMock()
+        s.id.hex = id_hex + "0000000000000000000000000000"  # pad to full UUID hex
+        return s
+
+    def test_empty_list(self):
+        assert _format_subtask_results([]) == ""
+
+    def test_completed_subtask(self):
+        s = self._make_subtask(
+            task="Research X", status="completed", result="Found Y",
+        )
+        output = _format_subtask_results([s])
+        assert "=== Completed Subtask ===" in output
+        assert "[subtask-abcdef01]" in output
+        assert "Task: Research X" in output
+        assert "Result: Found Y" in output
+
+    def test_failed_subtask(self):
+        s = self._make_subtask(
+            task="Analyze Y", status="failed", error="TimeoutError",
+        )
+        output = _format_subtask_results([s])
+        assert "=== Failed Subtask ===" in output
+        assert "[subtask-abcdef01]" in output
+        assert "Task: Analyze Y" in output
+        assert "Error: TimeoutError" in output
+
+    def test_mixed_completed_and_failed(self):
+        s1 = self._make_subtask(
+            task="Task A", status="completed", result="OK", id_hex="aaaa0001",
+        )
+        s2 = self._make_subtask(
+            task="Task B", status="failed", error="Boom", id_hex="bbbb0002",
+        )
+        output = _format_subtask_results([s1, s2])
+        assert "=== Completed Subtask ===" in output
+        assert "=== Failed Subtask ===" in output
+        assert "Result: OK" in output
+        assert "Error: Boom" in output
+        # Completed should come before failed
+        assert output.index("Completed") < output.index("Failed")
+
+    def test_none_result_and_error(self):
+        s = self._make_subtask(
+            task="Task C", status="completed", result=None,
+        )
+        output = _format_subtask_results([s])
+        assert "Result: None" in output

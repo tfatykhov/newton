@@ -75,14 +75,14 @@ def _format_subtask_results(subtasks: list) -> str:
     if completed:
         for s in completed:
             lines.append("=== Completed Subtask ===")
-            lines.append(f"Task: {s.task}")
+            lines.append(f"[subtask-{s.id.hex[:8]}] Task: {s.task}")
             lines.append(f"Result: {s.result}")
             lines.append("")
 
     if failed:
         for s in failed:
             lines.append("=== Failed Subtask ===")
-            lines.append(f"Task: {s.task}")
+            lines.append(f"[subtask-{s.id.hex[:8]}] Task: {s.task}")
             lines.append(f"Error: {s.error}")
             lines.append("")
 
