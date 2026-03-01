@@ -129,10 +129,11 @@ class Heart:
         self,
         limit: int = 10,
         outcome: str | None = None,
+        hours: int | None = None,
         session: AsyncSession | None = None,
     ) -> list[EpisodeSummary]:
         """List recent episodes."""
-        return await self.episodes.list_recent(limit, outcome, session)
+        return await self.episodes.list_recent(limit, outcome, hours=hours, session=session)
 
     async def link_decision_to_episode(
         self,

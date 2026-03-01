@@ -23,7 +23,7 @@ from nous.cognitive.context import ContextEngine
 from nous.cognitive.dedup import ConversationDeduplicator
 from nous.cognitive.deliberation import DeliberationEngine
 from nous.cognitive.frames import FrameEngine
-from nous.cognitive.intent import IntentClassifier
+from nous.cognitive.intent import IntentClassifier, IntentSignals
 from nous.cognitive.monitor import MonitorEngine
 from nous.cognitive.schemas import Assessment, SessionMetadata, TurnContext, TurnResult
 from nous.cognitive.usage_tracker import UsageTracker
@@ -42,6 +42,25 @@ _LEARNED_PATTERN = re.compile(r"^\s*[-*]?\s*learned:\s*(.+)$", re.IGNORECASE | r
 _MIN_CONTENT_LENGTH = 200  # Combined user+assistant chars
 _MIN_TURNS_WITHOUT_TOOLS = 1  # R: off-by-one fix — turn_count is incremented in post_turn,
                                # so during turn 2's pre_turn, turn_count==1
+
+# 008.6: Recap query detection
+_RECAP_PATTERNS = frozenset({
+    "what did we talk about",
+    "what have we discussed",
+    "what did we do",
+    "recent conversations",
+    "catch me up",
+    "what happened recently",
+    "what happened lately",
+    "recap",
+    "summary of recent",
+})
+
+
+def _is_recap_query(user_input: str) -> bool:
+    """Detect if user is asking for a temporal recap."""
+    lower = user_input.lower().strip()
+    return any(p in lower for p in _RECAP_PATTERNS)
 
 
 class CognitiveLayer:
@@ -199,6 +218,23 @@ class CognitiveLayer:
         signals = self._intent_classifier.classify(user_input, frame)
         plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
 
+        # 008.6: Detect recap queries and set temporal boost
+        _is_recap = _is_recap_query(user_input)
+        _temporal_boost = _is_recap or signals.temporal_recency > 0.5
+        # 008.6: Ensure budget boost fires even for bare recap queries without temporal words
+        if _is_recap and signals.temporal_recency <= 0.5:
+            _effective_recency = 0.8
+            signals = IntentSignals(
+                frame_type=signals.frame_type,
+                entity_mentions=signals.entity_mentions,
+                temporal_recency=_effective_recency,
+                memory_type_hints=signals.memory_type_hints,
+                is_question=signals.is_question,
+                is_greeting=signals.is_greeting,
+                topic_keywords=signals.topic_keywords,
+            )
+            plan = self._intent_classifier.plan_retrieval(signals, input_text=user_input)
+
         # 3. RECALL — build context (or initiation prompt)
         system_prompt = ""
         if _is_initiation:
@@ -236,6 +272,7 @@ class CognitiveLayer:
                     retrieval_plan=plan,
                     usage_tracker=self._usage_tracker,
                     identity_override=_identity_override,
+                    temporal_boost=_temporal_boost,  # 008.6
                 )
                 system_prompt = build_result.system_prompt
                 context_token_estimate = sum(s.token_estimate for s in build_result.sections)

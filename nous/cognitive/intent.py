@@ -148,10 +148,12 @@ class IntentClassifier:
         # F20: Short non-question input short-circuit
         # Inputs with no extractable keywords, no memory hints, and not a question
         # are likely short acknowledgements ("ok", "yes", "thanks") -- skip retrieval
+        # 008.6: Don't skip if temporal recency is high (recap queries)
         if (
             not signals.is_question
             and not signals.memory_type_hints
             and not signals.topic_keywords
+            and signals.temporal_recency <= 0.5
         ):
             return RetrievalPlan(
                 queries=[],
@@ -203,5 +205,15 @@ class IntentClassifier:
             }
         elif signals.frame_type == "decision":
             plan.budget_overrides = {"decisions": 3500, "procedures": 2000}
+
+        # 008.6: Temporal recency boost — ensure episodes are retrieved
+        if signals.temporal_recency > 0.5:
+            current_ep_budget = plan.budget_overrides.get("episodes", None)
+            if current_ep_budget is not None and current_ep_budget == 0:
+                plan.budget_overrides["episodes"] = 1000
+            # Boost episode query limit
+            for q in plan.queries:
+                if q.memory_type == "episode":
+                    q.limit = max(q.limit, 8)
 
         return plan

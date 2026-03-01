@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     fact_extraction_enabled: bool = True
     sleep_enabled: bool = True
     decision_review_enabled: bool = True
+    temporal_context_enabled: bool = True  # 008.6
     github_token: str = Field(
         default="",
         validation_alias="GITHUB_TOKEN",

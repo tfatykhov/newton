@@ -72,6 +72,7 @@ class ContextEngine:
         retrieval_plan: RetrievalPlan | None = None,
         usage_tracker: UsageTracker | None = None,
         identity_override: str | None = None,
+        temporal_boost: bool = False,  # 008.6
     ) -> BuildResult:
         """Build system prompt + context sections within budget.
 
@@ -359,12 +360,44 @@ class ContextEngine:
             except Exception as e:
                 logger.warning("Heart.search_procedures failed during context build: %s", e)
 
+        # 7.5 Temporal awareness — always include recent episode titles (008.6)
+        # Not gated by budget.episodes — this is a lightweight tier that shows
+        # only titles (+ summaries when boosted), separate from heavy semantic retrieval
+        _temporal_episode_ids: set[str] = set()
+        if self._settings.temporal_context_enabled:
+            try:
+                recent = await self._heart.list_episodes(limit=5, hours=48)
+                if recent:
+                    _temporal_episode_ids = {str(e.id) for e in recent}
+                    recent_lines = []
+                    for e in recent:
+                        title = e.title or (e.summary[:60] if e.summary else "Untitled")
+                        time_str = e.started_at.strftime("%b %d %H:%M")
+                        recent_lines.append(f"- [{time_str}] {title}")
+                        # 008.6: Include summaries when temporal boost is active
+                        if temporal_boost and e.summary and e.summary != e.title:
+                            recent_lines.append(f"  {e.summary[:200]}")
+                    recent_text = "\n".join(recent_lines)
+                    sections.append(
+                        ContextSection(
+                            priority=7,
+                            label="Recent Conversations",
+                            content=recent_text,
+                            token_estimate=self._estimate_tokens(recent_text),
+                        )
+                    )
+            except Exception as e:
+                logger.warning("Temporal tier failed: %s", e)
+
         # 8. Episodes
         if budget.episodes > 0 and "episode" not in skip_types:
             try:
                 limit = _limits.get("episode", 5)
                 q_text = _query_texts.get("episode", _default_query)
                 episodes = await self._heart.search_episodes(q_text, limit=limit, session=session)
+                # 008.6: Exclude episodes already shown in temporal tier
+                if _temporal_episode_ids:
+                    episodes = [e for e in episodes if str(e.id) not in _temporal_episode_ids]
                 if episodes and self._has_embeddings:
                     # Tier 3: min_score threshold (only with embeddings)
                     episodes = [e for e in episodes if (getattr(e, "score", None) or 0) >= TIER3_THRESHOLDS["episode"]]

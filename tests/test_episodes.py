@@ -176,13 +176,14 @@ async def test_link_procedure_with_effectiveness(heart, session):
 
 
 async def test_list_recent(heart, session):
-    """List recent episodes ordered by started_at DESC."""
-    # Create 3 episodes
+    """List recent closed episodes ordered by started_at DESC."""
+    # Create 3 episodes and close them (list_recent only returns closed episodes)
     for i in range(3):
-        await heart.start_episode(
+        ep = await heart.start_episode(
             _episode_input(title=f"Episode {i}", summary=f"Episode number {i}"),
             session=session,
         )
+        await heart.end_episode(ep.id, outcome="success", session=session)
 
     results = await heart.list_episodes(limit=10, session=session)
     assert isinstance(results, list)
