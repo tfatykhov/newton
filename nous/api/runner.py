@@ -36,12 +36,12 @@ _DECISION_FRAMES = frozenset({"decision", "task", "debug"})
 
 # Frame-gated tool access (D5)
 FRAME_TOOLS: dict[str, list[str]] = {
-    "conversation": ["record_decision", "learn_fact", "recall_deep", "recall_recent", "create_censor", "bash", "read_file", "write_file", "web_search", "web_fetch"],
-    "question": ["recall_deep", "recall_recent", "bash", "read_file", "write_file", "record_decision", "learn_fact", "create_censor", "web_search", "web_fetch"],
-    "decision": ["record_decision", "recall_deep", "recall_recent", "create_censor", "bash", "read_file", "web_search", "web_fetch"],
+    "conversation": ["record_decision", "learn_fact", "recall_deep", "recall_recent", "create_censor", "bash", "read_file", "write_file", "web_search", "web_fetch", "spawn_task", "schedule_task", "list_tasks", "cancel_task"],
+    "question": ["recall_deep", "recall_recent", "bash", "read_file", "write_file", "record_decision", "learn_fact", "create_censor", "web_search", "web_fetch", "list_tasks", "cancel_task"],
+    "decision": ["record_decision", "recall_deep", "recall_recent", "create_censor", "bash", "read_file", "web_search", "web_fetch", "list_tasks", "cancel_task"],
     "creative": ["learn_fact", "recall_deep", "recall_recent", "write_file", "web_search"],
     "task": ["*"],  # All tools
-    "debug": ["record_decision", "recall_deep", "recall_recent", "bash", "read_file", "learn_fact", "web_search", "web_fetch"],
+    "debug": ["record_decision", "recall_deep", "recall_recent", "bash", "read_file", "learn_fact", "web_search", "web_fetch", "spawn_task", "schedule_task", "list_tasks", "cancel_task"],
     "initiation": ["store_identity", "complete_initiation"],
 }
 
@@ -273,6 +273,7 @@ class AgentRunner:
         user_id: str | None = None,
         user_display_name: str | None = None,
         platform: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> tuple[str, TurnContext, dict[str, int]]:
         """Execute a single conversational turn.
 
@@ -315,6 +316,8 @@ class AgentRunner:
         error = None
         try:
             system_prompt = self._build_system_prompt(turn_context, platform=platform)
+            if system_prompt_prefix:
+                system_prompt = system_prompt_prefix + "\n\n" + system_prompt
 
             # Layer 2: History compaction (Spec 008.1)
             if self._compactor and self._settings.compaction_enabled:
@@ -593,6 +596,7 @@ class AgentRunner:
         user_id: str | None = None,
         user_display_name: str | None = None,
         platform: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Full chat turn with streaming, including tool loops.
 
@@ -621,6 +625,8 @@ class AgentRunner:
         conversation.messages.append(Message(role="user", content=user_message))
 
         system_prompt = self._build_system_prompt(turn_context, platform=platform)
+        if system_prompt_prefix:
+            system_prompt = system_prompt_prefix + "\n\n" + system_prompt
         tools = self._dispatcher.available_tools(turn_context.frame.frame_id)
         messages = self._format_messages(conversation)
 

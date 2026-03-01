@@ -40,6 +40,8 @@ from nous.heart.schemas import (
     WorkingMemoryItem,
     WorkingMemoryState,
 )
+from nous.heart.schedules import ScheduleManager
+from nous.heart.subtasks import SubtaskManager
 from nous.heart.working_memory import WorkingMemoryManager
 from nous.storage.database import Database
 from nous.storage.models import ConversationState
@@ -74,6 +76,8 @@ class Heart:
         self.procedures = ProcedureManager(database, embedding_provider, settings.agent_id)
         self.censors = CensorManager(database, embedding_provider, settings.agent_id)
         self.working_memory = WorkingMemoryManager(database, settings.agent_id)
+        self.subtasks = SubtaskManager(database, settings.agent_id)
+        self.schedules = ScheduleManager(database, settings.agent_id)
 
     # ------------------------------------------------------------------
     # Lifecycle (P2-2)

@@ -16,6 +16,12 @@ Endpoints:
   GET  /identity          - Get current agent identity
   PUT  /identity/{section} - Update an identity section
   POST /reinitiate        - Reset identity and re-run initiation
+  GET  /subtasks          - List subtasks (Heart)
+  GET  /subtasks/{id}     - Subtask detail
+  DELETE /subtasks/{id}   - Cancel a pending subtask
+  GET  /schedules         - List schedules (Heart)
+  POST /schedules         - Create a schedule externally
+  DELETE /schedules/{id}  - Deactivate a schedule
   GET  /health            - Health check (DB connectivity)
 """
 
@@ -436,6 +442,203 @@ def create_app(
             "total": len(decisions),
         })
 
+    # ------------------------------------------------------------------
+    # 011.1: Subtask & Schedule endpoints
+    # ------------------------------------------------------------------
+
+    async def list_subtasks(request: Request) -> JSONResponse:
+        """GET /subtasks?status=pending&limit=20 — list subtasks."""
+        try:
+            status_filter = request.query_params.get("status")
+            limit = int(request.query_params.get("limit", "20"))
+        except ValueError:
+            return JSONResponse({"error": "limit must be an integer"}, status_code=400)
+
+        try:
+            subtasks = await heart.subtasks.list(status=status_filter, limit=limit)
+            return JSONResponse({
+                "subtasks": [
+                    {
+                        "id": str(st.id),
+                        "task": st.task,
+                        "status": st.status,
+                        "priority": st.priority,
+                        "result": st.result,
+                        "error": st.error,
+                        "worker_id": st.worker_id,
+                        "notify": st.notify,
+                        "timeout_seconds": st.timeout_seconds,
+                        "created_at": st.created_at.isoformat() if st.created_at else None,
+                        "started_at": st.started_at.isoformat() if st.started_at else None,
+                        "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+                    }
+                    for st in subtasks
+                ],
+            })
+        except Exception as e:
+            logger.error("List subtasks error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def get_subtask(request: Request) -> JSONResponse:
+        """GET /subtasks/{id} — subtask detail."""
+        subtask_id_str = request.path_params["id"]
+        try:
+            subtask_id = UUID(subtask_id_str)
+        except ValueError:
+            return JSONResponse({"error": "Invalid subtask ID"}, status_code=400)
+
+        try:
+            st = await heart.subtasks.get(subtask_id)
+            if st is None:
+                return JSONResponse({"error": "Subtask not found"}, status_code=404)
+            return JSONResponse({
+                "id": str(st.id),
+                "task": st.task,
+                "status": st.status,
+                "priority": st.priority,
+                "result": st.result,
+                "error": st.error,
+                "worker_id": st.worker_id,
+                "notify": st.notify,
+                "timeout_seconds": st.timeout_seconds,
+                "created_at": st.created_at.isoformat() if st.created_at else None,
+                "started_at": st.started_at.isoformat() if st.started_at else None,
+                "completed_at": st.completed_at.isoformat() if st.completed_at else None,
+                "metadata": st.metadata_,
+            })
+        except Exception as e:
+            logger.error("Get subtask error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def cancel_subtask(request: Request) -> JSONResponse:
+        """DELETE /subtasks/{id} — cancel a pending subtask."""
+        subtask_id_str = request.path_params["id"]
+        try:
+            subtask_id = UUID(subtask_id_str)
+        except ValueError:
+            return JSONResponse({"error": "Invalid subtask ID"}, status_code=400)
+
+        try:
+            cancelled = await heart.subtasks.cancel(subtask_id)
+            if not cancelled:
+                return JSONResponse(
+                    {"error": "Subtask not found or not in pending status"},
+                    status_code=404,
+                )
+            return JSONResponse({"status": "cancelled", "id": subtask_id_str})
+        except Exception as e:
+            logger.error("Cancel subtask error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def list_schedules(request: Request) -> JSONResponse:
+        """GET /schedules?active_only=true&limit=20 — list schedules."""
+        try:
+            active_only = request.query_params.get("active_only", "true").lower() != "false"
+            limit = int(request.query_params.get("limit", "20"))
+        except ValueError:
+            return JSONResponse({"error": "limit must be an integer"}, status_code=400)
+
+        try:
+            schedules = await heart.schedules.list(active_only=active_only, limit=limit)
+            return JSONResponse({
+                "schedules": [
+                    {
+                        "id": str(sc.id),
+                        "task": sc.task,
+                        "schedule_type": sc.schedule_type,
+                        "active": sc.active,
+                        "cron_expr": sc.cron_expr,
+                        "interval_seconds": sc.interval_seconds,
+                        "next_fire_at": sc.next_fire_at.isoformat() if sc.next_fire_at else None,
+                        "last_fired_at": sc.last_fired_at.isoformat() if sc.last_fired_at else None,
+                        "fire_count": sc.fire_count,
+                        "max_fires": sc.max_fires,
+                        "notify": sc.notify,
+                        "created_at": sc.created_at.isoformat() if sc.created_at else None,
+                    }
+                    for sc in schedules
+                ],
+            })
+        except Exception as e:
+            logger.error("List schedules error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def create_schedule(request: Request) -> JSONResponse:
+        """POST /schedules — create a schedule externally."""
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+        task = body.get("task")
+        if not task:
+            return JSONResponse({"error": "Missing required field: task"}, status_code=400)
+
+        when = body.get("when")
+        every = body.get("every")
+
+        if bool(when) == bool(every):
+            return JSONResponse(
+                {"error": "Exactly one of 'when' or 'every' must be provided"},
+                status_code=400,
+            )
+
+        try:
+            from nous.handlers.time_parser import parse_every, parse_when
+
+            notify = body.get("notify", True)
+            timeout = body.get("timeout", 120)
+
+            if when:
+                fire_at = parse_when(when)
+                schedule = await heart.schedules.create(
+                    task=task,
+                    schedule_type="once",
+                    fire_at=fire_at,
+                    notify=notify,
+                    timeout=timeout,
+                )
+            else:
+                interval_seconds, cron_expr = parse_every(every)
+                schedule = await heart.schedules.create(
+                    task=task,
+                    schedule_type="recurring",
+                    interval_seconds=interval_seconds,
+                    cron_expr=cron_expr,
+                    notify=notify,
+                    timeout=timeout,
+                )
+
+            return JSONResponse({
+                "id": str(schedule.id),
+                "schedule_type": schedule.schedule_type,
+                "next_fire_at": schedule.next_fire_at.isoformat() if schedule.next_fire_at else None,
+                "active": schedule.active,
+            })
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.error("Create schedule error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def deactivate_schedule(request: Request) -> JSONResponse:
+        """DELETE /schedules/{id} — deactivate a schedule."""
+        schedule_id_str = request.path_params["id"]
+        try:
+            schedule_id = UUID(schedule_id_str)
+        except ValueError:
+            return JSONResponse({"error": "Invalid schedule ID"}, status_code=400)
+
+        try:
+            schedule = await heart.schedules.get(schedule_id)
+            if schedule is None:
+                return JSONResponse({"error": "Schedule not found"}, status_code=404)
+            await heart.schedules.deactivate(schedule_id)
+            return JSONResponse({"status": "deactivated", "id": schedule_id_str})
+        except Exception as e:
+            logger.error("Deactivate schedule error: %s", e)
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     routes = [
         Route("/chat", chat, methods=["POST"]),
         Route("/chat/stream", chat_stream, methods=["POST"]),
@@ -453,6 +656,12 @@ def create_app(
         Route("/identity", get_identity),
         Route("/identity/{section}", update_identity_section, methods=["PUT"]),
         Route("/reinitiate", reinitiate, methods=["POST"]),
+        Route("/subtasks", list_subtasks),
+        Route("/subtasks/{id}", get_subtask),
+        Route("/subtasks/{id}", cancel_subtask, methods=["DELETE"]),
+        Route("/schedules", list_schedules),
+        Route("/schedules", create_schedule, methods=["POST"]),
+        Route("/schedules/{id}", deactivate_schedule, methods=["DELETE"]),
         Route("/health", health),
     ]
 

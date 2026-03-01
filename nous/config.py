@@ -143,6 +143,18 @@ class Settings(BaseSettings):
         default=20_000, validation_alias="NOUS_KEEP_RECENT_TOKENS"
     )
 
+    # 011.1: Subtasks & Scheduling
+    subtask_enabled: bool = True
+    subtask_workers: int = 2
+    subtask_poll_interval: float = 2.0
+    subtask_default_timeout: int = 120
+    subtask_max_timeout: int = 600
+    subtask_max_concurrent: int = 3
+    schedule_enabled: bool = True
+    schedule_check_interval: int = 60
+    telegram_bot_token: str | None = None
+    telegram_chat_id: str | None = None
+
     @model_validator(mode="after")
     def _validate_keepalive(self) -> "Settings":
         if self.keepalive_interval >= self.tool_timeout:

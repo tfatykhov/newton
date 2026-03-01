@@ -170,9 +170,37 @@ async def create_components(settings: Settings) -> dict:
     from nous.identity.tools import register_identity_tools
     register_identity_tools(dispatcher, identity_manager)
 
+    # 011.1: Register subtask/schedule tools
+    if settings.subtask_enabled:
+        from nous.api.tools import register_subtask_tools
+        register_subtask_tools(dispatcher, heart, settings)
+
     runner = AgentRunner(cognitive, brain, heart, settings)
     runner.set_dispatcher(dispatcher)
     await runner.start()
+
+    # 011.1: Start SubtaskWorkerPool (needs runner + bus)
+    subtask_pool = None
+    if settings.subtask_enabled and bus is not None:
+        try:
+            from nous.handlers.subtask_worker import SubtaskWorkerPool
+            subtask_pool = SubtaskWorkerPool(
+                runner=runner, heart=heart, settings=settings,
+                bus=bus, http_client=handler_http,
+            )
+            await subtask_pool.start()
+        except ImportError:
+            logger.debug("SubtaskWorkerPool not available yet")
+
+    # 011.1: Start TaskScheduler
+    task_scheduler = None
+    if settings.schedule_enabled:
+        try:
+            from nous.handlers.task_scheduler import TaskScheduler
+            task_scheduler = TaskScheduler(heart, settings)
+            await task_scheduler.start()
+        except ImportError:
+            logger.debug("TaskScheduler not available yet")
 
     return {
         "database": database,
@@ -187,12 +215,22 @@ async def create_components(settings: Settings) -> dict:
         "session_monitor": session_monitor,
         "handler_http": handler_http,
         "identity_manager": identity_manager,
+        "subtask_pool": subtask_pool,
+        "task_scheduler": task_scheduler,
     }
 
 
 async def shutdown_components(components: dict) -> None:
     """Graceful shutdown in reverse order."""
     logger.info("Shutting down Nous...")
+
+    # 011.1: Stop subtask pool and task scheduler first
+    subtask_pool = components.get("subtask_pool")
+    if subtask_pool:
+        await subtask_pool.stop()
+    task_scheduler = components.get("task_scheduler")
+    if task_scheduler:
+        await task_scheduler.stop()
 
     # 006: Stop session monitor and event bus first
     session_monitor = components.get("session_monitor")

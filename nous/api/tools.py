@@ -609,3 +609,331 @@ def register_nous_tools(dispatcher: ToolDispatcher, brain: Brain, heart: Heart) 
     dispatcher.register("recall_deep", closures["recall_deep"], _RECALL_DEEP_SCHEMA)
     dispatcher.register("create_censor", closures["create_censor"], _CREATE_CENSOR_SCHEMA)
     dispatcher.register("recall_recent", closures["recall_recent"], _RECALL_RECENT_SCHEMA)
+
+
+# ---------------------------------------------------------------------------
+# Subtask & Schedule tool closures (011.1)
+# ---------------------------------------------------------------------------
+
+
+def create_subtask_tools(heart: Heart, settings: "Settings") -> dict[str, Any]:
+    """Create subtask/schedule tool closures with Heart captured in closure context.
+
+    Returns a dict of async callables suitable for ToolDispatcher registration.
+    """
+    from nous.config import Settings as _Settings  # noqa: F811 — deferred to avoid circular
+
+    async def spawn_task(
+        task: str,
+        priority: str = "normal",
+        timeout: int | None = None,
+        notify: bool = True,
+    ) -> dict[str, Any]:
+        """Spawn a background subtask for the worker pool.
+
+        Args:
+            task: Natural-language instruction for the subtask
+            priority: urgent, normal, or low
+            timeout: Max seconds (clamped to settings.subtask_max_timeout)
+            notify: Whether to notify on completion
+
+        Returns:
+            MCP-compliant response with subtask ID or error message
+        """
+        try:
+            effective_timeout = min(
+                timeout or settings.subtask_default_timeout,
+                settings.subtask_max_timeout,
+            )
+            subtask = await heart.subtasks.create(
+                task=task,
+                priority=priority,
+                timeout=effective_timeout,
+                notify=notify,
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Subtask spawned.\n"
+                            f"ID: {subtask.id}\n"
+                            f"Priority: {priority}\n"
+                            f"Timeout: {effective_timeout}s"
+                        ),
+                    }
+                ]
+            }
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Cannot spawn subtask: {e}"}]}
+        except Exception as e:
+            logger.exception("spawn_task tool failed")
+            return {"content": [{"type": "text", "text": f"Error spawning subtask: {e}"}]}
+
+    async def schedule_task(
+        task: str,
+        when: str | None = None,
+        every: str | None = None,
+        notify: bool = True,
+    ) -> dict[str, Any]:
+        """Schedule a task for later or recurring execution.
+
+        Exactly one of ``when`` or ``every`` must be provided.
+
+        Args:
+            task: Natural-language instruction
+            when: One-shot time (e.g. "in 2 hours", ISO 8601)
+            every: Recurring pattern (e.g. "daily at 8am", "30 minutes")
+            notify: Whether to notify on each fire
+
+        Returns:
+            MCP-compliant response with schedule ID and next fire time
+        """
+        try:
+            if bool(when) == bool(every):
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Exactly one of 'when' or 'every' must be provided.",
+                        }
+                    ]
+                }
+
+            from nous.handlers.time_parser import parse_every, parse_when
+
+            if when:
+                fire_at = parse_when(when)
+                schedule = await heart.schedules.create(
+                    task=task,
+                    schedule_type="once",
+                    fire_at=fire_at,
+                    notify=notify,
+                    timeout=settings.subtask_default_timeout,
+                )
+            else:
+                interval_seconds, cron_expr = parse_every(every)  # type: ignore[arg-type]
+                schedule = await heart.schedules.create(
+                    task=task,
+                    schedule_type="recurring",
+                    interval_seconds=interval_seconds,
+                    cron_expr=cron_expr,
+                    notify=notify,
+                    timeout=settings.subtask_default_timeout,
+                )
+
+            next_fire = (
+                schedule.next_fire_at.isoformat() if schedule.next_fire_at else "N/A"
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Schedule created.\n"
+                            f"ID: {schedule.id}\n"
+                            f"Type: {schedule.schedule_type}\n"
+                            f"Next fire: {next_fire}"
+                        ),
+                    }
+                ]
+            }
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Schedule error: {e}"}]}
+        except Exception as e:
+            logger.exception("schedule_task tool failed")
+            return {"content": [{"type": "text", "text": f"Error scheduling task: {e}"}]}
+
+    async def list_tasks(
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """List subtasks and schedules.
+
+        Args:
+            status: Filter subtasks by status (pending, running, completed, failed, cancelled)
+
+        Returns:
+            MCP-compliant response with formatted task list
+        """
+        try:
+            subtasks = await heart.subtasks.list(status=status, limit=20)
+            schedules = await heart.schedules.list(active_only=True, limit=20)
+
+            lines: list[str] = []
+
+            if subtasks:
+                lines.append("=== Subtasks ===")
+                for st in subtasks:
+                    lines.append(
+                        f"- [{st.status}] {st.id} | {st.task[:80]}"
+                    )
+            else:
+                lines.append("=== Subtasks ===\nNo subtasks found.")
+
+            if schedules:
+                lines.append("\n=== Schedules ===")
+                for sc in schedules:
+                    next_fire = (
+                        sc.next_fire_at.strftime("%Y-%m-%d %H:%M UTC")
+                        if sc.next_fire_at
+                        else "N/A"
+                    )
+                    lines.append(
+                        f"- [{sc.schedule_type}] {sc.id} | {sc.task[:80]} (next: {next_fire})"
+                    )
+            else:
+                lines.append("\n=== Schedules ===\nNo active schedules.")
+
+            return {"content": [{"type": "text", "text": "\n".join(lines)}]}
+        except Exception as e:
+            logger.exception("list_tasks tool failed")
+            return {"content": [{"type": "text", "text": f"Error listing tasks: {e}"}]}
+
+    async def cancel_task(
+        task_id: str,
+    ) -> dict[str, Any]:
+        """Cancel a subtask or deactivate a schedule by ID.
+
+        Args:
+            task_id: UUID of the subtask or schedule to cancel
+
+        Returns:
+            MCP-compliant response confirming cancellation or error
+        """
+        try:
+            from uuid import UUID as _UUID
+
+            uid = _UUID(task_id)
+
+            # Try subtask cancel first
+            cancelled = await heart.subtasks.cancel(uid)
+            if cancelled:
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Subtask {task_id} cancelled."}
+                    ]
+                }
+
+            # Try schedule deactivation
+            schedule = await heart.schedules.get(uid)
+            if schedule:
+                await heart.schedules.deactivate(uid)
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Schedule {task_id} deactivated."}
+                    ]
+                }
+
+            return {
+                "content": [
+                    {"type": "text", "text": f"No pending subtask or active schedule found for {task_id}."}
+                ]
+            }
+        except ValueError:
+            return {"content": [{"type": "text", "text": f"Invalid task ID: {task_id}"}]}
+        except Exception as e:
+            logger.exception("cancel_task tool failed")
+            return {"content": [{"type": "text", "text": f"Error cancelling task: {e}"}]}
+
+    return {
+        "spawn_task": spawn_task,
+        "schedule_task": schedule_task,
+        "list_tasks": list_tasks,
+        "cancel_task": cancel_task,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Subtask & Schedule tool schemas (Anthropic API format)
+# ---------------------------------------------------------------------------
+
+_SPAWN_TASK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Spawn a background subtask for the worker pool to execute autonomously",
+    "properties": {
+        "task": {
+            "type": "string",
+            "description": "Natural-language instruction for the subtask",
+        },
+        "priority": {
+            "type": "string",
+            "description": "Task priority",
+            "enum": ["urgent", "normal", "low"],
+            "default": "normal",
+        },
+        "timeout": {
+            "type": "integer",
+            "description": "Max execution seconds (clamped to server max)",
+            "minimum": 10,
+        },
+        "notify": {
+            "type": "boolean",
+            "description": "Notify on completion",
+            "default": True,
+        },
+    },
+    "required": ["task"],
+}
+
+_SCHEDULE_TASK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Schedule a task for later or recurring execution. Provide exactly one of 'when' or 'every'.",
+    "properties": {
+        "task": {
+            "type": "string",
+            "description": "Natural-language instruction for the task",
+        },
+        "when": {
+            "type": "string",
+            "description": "One-shot time: 'in 2 hours', ISO 8601, or natural language",
+        },
+        "every": {
+            "type": "string",
+            "description": "Recurring pattern: 'daily at 8am', '30 minutes', 'every monday at 10am'",
+        },
+        "notify": {
+            "type": "boolean",
+            "description": "Notify on each fire",
+            "default": True,
+        },
+    },
+    "required": ["task"],
+}
+
+_LIST_TASKS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "List current subtasks and active schedules",
+    "properties": {
+        "status": {
+            "type": "string",
+            "description": "Filter subtasks by status",
+            "enum": ["pending", "running", "completed", "failed", "cancelled"],
+        },
+    },
+    "required": [],
+}
+
+_CANCEL_TASK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Cancel a subtask or deactivate a schedule by ID",
+    "properties": {
+        "task_id": {
+            "type": "string",
+            "description": "UUID of the subtask or schedule to cancel",
+        },
+    },
+    "required": ["task_id"],
+}
+
+
+def register_subtask_tools(dispatcher: ToolDispatcher, heart: Heart, settings: "Settings") -> None:
+    """Create subtask/schedule tools and register them with the dispatcher.
+
+    Called at startup when subtask_enabled is True.
+    """
+    closures = create_subtask_tools(heart, settings)
+
+    dispatcher.register("spawn_task", closures["spawn_task"], _SPAWN_TASK_SCHEMA)
+    dispatcher.register("schedule_task", closures["schedule_task"], _SCHEDULE_TASK_SCHEMA)
+    dispatcher.register("list_tasks", closures["list_tasks"], _LIST_TASKS_SCHEMA)
+    dispatcher.register("cancel_task", closures["cancel_task"], _CANCEL_TASK_SCHEMA)
