@@ -557,3 +557,24 @@ async def test_is_informational_delegates_to_action_report(cognitive):
     # This text doesn't match any keyword pattern, but has 2+ action markers
     # ("pushed", "merged") with tool results, so _is_action_report catches it
     assert cognitive._is_informational(tr) is True
+
+
+# ---------------------------------------------------------------------------
+# 009.5: Integration — task frame no longer triggers deliberation
+# ---------------------------------------------------------------------------
+
+
+async def test_task_frame_no_deliberation(cognitive):
+    """009.5: Task frame no longer triggers auto-deliberation."""
+    from nous.cognitive.schemas import FrameSelection
+
+    frame = FrameSelection(
+        frame_id="task",
+        frame_name="Task Execution",
+        confidence=0.9,
+        match_method="pattern",
+        default_category="tooling",
+        default_stakes="medium",
+    )
+    result = await cognitive._deliberation.should_deliberate(frame)
+    assert result is False
