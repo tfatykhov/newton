@@ -166,3 +166,70 @@ async def test_should_deliberate_conversation(delib):
     frame = _frame("conversation", frame_name="Conversation")
     result = await delib.should_deliberate(frame)
     assert result is False
+
+
+# ---------------------------------------------------------------------------
+# 8. test_get_recent_decisions_returns_recent (009.5 Task 4)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_recent_decisions_returns_recent(brain, session):
+    """009.5: get_recent_decisions() returns decisions created with a session_id."""
+    from datetime import UTC, datetime, timedelta
+
+    from nous.brain.schemas import ReasonInput, RecordInput
+
+    record_input = RecordInput(
+        description="Pick a database engine",
+        confidence=0.7,
+        category="architecture",
+        stakes="high",
+        reasons=[ReasonInput(type="analysis", text="Evaluating options")],
+        session_id="session-alpha",
+    )
+    detail = await brain.record(record_input, session=session)
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    results = await brain.get_recent_decisions(
+        "nous-default", since=cutoff, session_id="session-alpha", session=session,
+    )
+    assert len(results) >= 1
+    assert any(r.id == detail.id for r in results)
+
+
+# ---------------------------------------------------------------------------
+# 9. test_get_recent_decisions_filters_by_session (009.5 Task 4)
+# ---------------------------------------------------------------------------
+
+
+async def test_get_recent_decisions_filters_by_session(brain, session):
+    """009.5: get_recent_decisions() only returns decisions from the queried session."""
+    from datetime import UTC, datetime, timedelta
+
+    from nous.brain.schemas import ReasonInput, RecordInput
+
+    input_a = RecordInput(
+        description="Decision in session A",
+        confidence=0.6,
+        category="process",
+        stakes="low",
+        reasons=[ReasonInput(type="analysis", text="Session A work")],
+        session_id="session-A",
+    )
+    input_b = RecordInput(
+        description="Decision in session B",
+        confidence=0.6,
+        category="process",
+        stakes="low",
+        reasons=[ReasonInput(type="analysis", text="Session B work")],
+        session_id="session-B",
+    )
+    await brain.record(input_a, session=session)
+    detail_b = await brain.record(input_b, session=session)
+
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    results = await brain.get_recent_decisions(
+        "nous-default", since=cutoff, session_id="session-B", session=session,
+    )
+    assert len(results) == 1
+    assert results[0].id == detail_b.id
