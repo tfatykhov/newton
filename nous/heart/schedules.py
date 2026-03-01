@@ -103,6 +103,10 @@ class ScheduleManager:
                 schedule.next_fire_at = fired_at + timedelta(
                     seconds=schedule.interval_seconds
                 )
+            else:
+                # One-shot schedule or missing timing: deactivate
+                schedule.active = False
+                schedule.next_fire_at = None
 
             await session.commit()
             logger.info(

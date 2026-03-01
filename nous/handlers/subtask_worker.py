@@ -95,21 +95,6 @@ class SubtaskWorkerPool:
                     await asyncio.sleep(self._settings.subtask_poll_interval)
                     continue
 
-                # Concurrency guard: check running count
-                counts = await self._heart.subtasks.count_by_status()
-                running_count = counts.get("running", 0)
-                if running_count > self._settings.subtask_max_concurrent:
-                    logger.warning(
-                        "Concurrency limit reached (%d/%d), re-enqueuing %s",
-                        running_count,
-                        self._settings.subtask_max_concurrent,
-                        subtask.id.hex[:8],
-                    )
-                    # Put it back by failing and letting reclaim handle it,
-                    # or just sleep and retry next loop. Simpler: sleep.
-                    await asyncio.sleep(self._settings.subtask_poll_interval)
-                    continue
-
                 await self._process_subtask(subtask)
 
             except asyncio.CancelledError:
