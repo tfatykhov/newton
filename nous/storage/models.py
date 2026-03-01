@@ -535,3 +535,76 @@ class ConversationState(Base):
     compaction_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# 011.1: Subtasks & Scheduling (F009)
+# ---------------------------------------------------------------------------
+
+
+class Subtask(Base):
+    """Background subtask queue entry."""
+
+    __tablename__ = "subtasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled')",
+            name="chk_subtask_status",
+        ),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    parent_session_id: Mapped[str | None] = mapped_column(String(200))
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="100")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    result: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    worker_id: Mapped[str | None] = mapped_column(String(100))
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="120")
+    notify: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default="{}"
+    )
+
+
+class Schedule(Base):
+    """Scheduled or recurring task."""
+
+    __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint(
+            "schedule_type IN ('once', 'recurring')",
+            name="chk_schedule_type",
+        ),
+        {"schema": "heart"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    agent_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    schedule_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    interval_seconds: Mapped[int | None] = mapped_column(Integer)
+    cron_expr: Mapped[str | None] = mapped_column(String(200))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fire_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    max_fires: Mapped[int | None] = mapped_column(Integer)
+    notify: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="120")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    created_by_session: Mapped[str | None] = mapped_column(String(200))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default="{}"
+    )
