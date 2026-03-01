@@ -224,3 +224,30 @@ class TestSubtaskManager:
         counts = await subtask_mgr.count_by_status()
         assert counts["pending"] == 1
         assert counts["running"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Heart integration tests
+# ---------------------------------------------------------------------------
+
+from nous.heart.heart import Heart
+
+
+class TestHeartIntegration:
+    """Verify Heart exposes subtask and schedule managers."""
+
+    async def test_heart_has_subtask_manager(self, db, settings):
+        heart = Heart(db, settings)
+        assert heart.subtasks is not None
+        assert hasattr(heart.subtasks, "create")
+        assert hasattr(heart.subtasks, "dequeue")
+        assert hasattr(heart.subtasks, "complete")
+        await heart.close()
+
+    async def test_heart_has_schedule_manager(self, db, settings):
+        heart = Heart(db, settings)
+        assert heart.schedules is not None
+        assert hasattr(heart.schedules, "create")
+        assert hasattr(heart.schedules, "get_due")
+        assert hasattr(heart.schedules, "advance")
+        await heart.close()
