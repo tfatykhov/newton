@@ -66,6 +66,7 @@ All shipped implementation specs with PR references:
 | 008.4 | Episode Summary Quality | ✅ Shipped | — enhanced prompt, candidate_facts, smart truncation, decision context |
 | 008.5 | Decision Review Loop | ✅ Shipped | #81 — auto-review signals, REST endpoints, calibration snapshots |
 | 009.1-009.4 | Memory Lifecycle Implementation | 📦 Shelved | — system too young (53 facts, 86 episodes at time of assessment) |
+| 009.5 | Decision Quality Gate | 📋 Specced | — 3-layer filter: source filtering, dedup window, quality gate. Fixes 43% noise rate |
 | 010.1 | Health Dashboard (F007 Phase 1) | 📋 Specced | — enrich GET /status |
 | — | Streaming Keepalive + Tool Timeout | ✅ Shipped | #73 — keepalive during Anthropic wait, `NOUS_TOOL_TIMEOUT` |
 | — | Typing Indicator Fix | ✅ Shipped | — continuous typing via background task |
