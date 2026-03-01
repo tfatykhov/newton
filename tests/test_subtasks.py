@@ -1,13 +1,17 @@
-"""Tests for subtask queue and scheduling (011.1)."""
+"""Tests for subtask queue, scheduling, and worker pool (011.1)."""
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nous.config import Settings
+from nous.handlers.subtask_worker import SubtaskWorkerPool
 from nous.storage.models import Schedule, Subtask
 
 
@@ -251,3 +255,243 @@ class TestHeartIntegration:
         assert hasattr(heart.schedules, "get_due")
         assert hasattr(heart.schedules, "advance")
         await heart.close()
+
+
+# ---------------------------------------------------------------------------
+# SubtaskWorkerPool tests
+# ---------------------------------------------------------------------------
+
+
+class TestSubtaskWorkerPool:
+    """Worker pool tests using mocked runner and bus."""
+
+    @pytest.fixture
+    def mock_runner(self):
+        runner = AsyncMock()
+        runner.run_turn = AsyncMock(return_value=(
+            "Task completed successfully",
+            MagicMock(),  # TurnContext
+            {"input_tokens": 100, "output_tokens": 50},
+        ))
+        return runner
+
+    @pytest.fixture
+    def mock_bus(self):
+        bus = AsyncMock()
+        bus.emit = AsyncMock()
+        return bus
+
+    @pytest.fixture
+    def worker_settings(self):
+        return Settings(
+            subtask_workers=1,
+            subtask_poll_interval=0.1,
+            subtask_default_timeout=120,
+            subtask_max_concurrent=3,
+            telegram_bot_token=None,
+            telegram_chat_id=None,
+        )
+
+    @pytest_asyncio.fixture
+    async def worker_heart(self, db, worker_settings):
+        heart = Heart(db, worker_settings)
+        yield heart
+        await heart.close()
+
+    async def test_execute_subtask_success(
+        self, mock_runner, worker_heart, worker_settings, mock_bus
+    ):
+        """Executing a subtask calls runner.run_turn and marks complete."""
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            bus=mock_bus,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="Test background work")
+        # Dequeue to set status to running (as the worker loop would)
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+        assert dequeued is not None
+
+        await pool._execute_subtask(dequeued)
+
+        # Runner was called with correct session_id
+        mock_runner.run_turn.assert_awaited_once()
+        call_kwargs = mock_runner.run_turn.call_args
+        assert call_kwargs.kwargs["session_id"] == f"subtask-{subtask.id.hex[:8]}"
+        assert call_kwargs.kwargs["user_message"] == "Test background work"
+
+        # Subtask marked complete
+        updated = await worker_heart.subtasks.get(subtask.id)
+        assert updated.status == "completed"
+        assert updated.result == "Task completed successfully"
+
+        # Event emitted
+        mock_bus.emit.assert_awaited()
+        emitted_event = mock_bus.emit.call_args[0][0]
+        assert emitted_event.type == "subtask_completed"
+
+    async def test_execute_subtask_failure(
+        self, mock_runner, worker_heart, worker_settings, mock_bus
+    ):
+        """A failing runner marks the subtask as failed and emits error event."""
+        mock_runner.run_turn = AsyncMock(side_effect=RuntimeError("LLM API down"))
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            bus=mock_bus,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="Doomed task")
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._execute_subtask(dequeued)
+
+        updated = await worker_heart.subtasks.get(subtask.id)
+        assert updated.status == "failed"
+        assert "RuntimeError" in updated.error
+
+        mock_bus.emit.assert_awaited()
+        emitted_event = mock_bus.emit.call_args[0][0]
+        assert emitted_event.type == "subtask_failed"
+
+    async def test_process_subtask_timeout(
+        self, worker_heart, worker_settings, mock_bus
+    ):
+        """A subtask exceeding its timeout is marked failed."""
+        # Runner that takes too long
+        async def slow_turn(**kwargs):
+            await asyncio.sleep(10)
+            return ("done", MagicMock(), {})
+
+        slow_runner = AsyncMock()
+        slow_runner.run_turn = slow_turn
+
+        pool = SubtaskWorkerPool(
+            runner=slow_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            bus=mock_bus,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="Slow task", timeout=1)
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._process_subtask(dequeued)
+
+        updated = await worker_heart.subtasks.get(subtask.id)
+        assert updated.status == "failed"
+        assert "timed out" in updated.error
+
+    async def test_execute_subtask_no_bus(
+        self, mock_runner, worker_heart, worker_settings
+    ):
+        """Worker pool works without event bus (bus=None)."""
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            bus=None,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="No bus task")
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._execute_subtask(dequeued)
+
+        updated = await worker_heart.subtasks.get(subtask.id)
+        assert updated.status == "completed"
+
+    async def test_start_reclaims_stale(
+        self, mock_runner, worker_heart, worker_settings
+    ):
+        """start() calls reclaim_stale on startup."""
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+        )
+
+        # Spy on reclaim_stale
+        original_reclaim = worker_heart.subtasks.reclaim_stale
+        reclaim_called = False
+
+        async def spy_reclaim():
+            nonlocal reclaim_called
+            reclaim_called = True
+            return await original_reclaim()
+
+        worker_heart.subtasks.reclaim_stale = spy_reclaim
+
+        await pool.start()
+        assert reclaim_called
+        await pool.stop()
+
+    async def test_start_and_stop_workers(
+        self, mock_runner, worker_heart, worker_settings
+    ):
+        """start() spawns workers, stop() cancels them."""
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+        )
+
+        await pool.start()
+        assert len(pool._workers) == 1  # subtask_workers=1 in fixture
+
+        await pool.stop()
+        assert len(pool._workers) == 0
+
+    async def test_telegram_notification_on_success(
+        self, mock_runner, worker_heart, worker_settings
+    ):
+        """Telegram notification sent on successful completion when configured."""
+        worker_settings.telegram_bot_token = "test-token"
+        worker_settings.telegram_chat_id = "12345"
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=MagicMock(status_code=200))
+
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            http_client=mock_http,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="Notify me", notify=True)
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._execute_subtask(dequeued)
+
+        mock_http.post.assert_awaited()
+        call_args = mock_http.post.call_args
+        assert "sendMessage" in call_args[0][0]
+        body = call_args.kwargs["json"]
+        assert body["chat_id"] == "12345"
+        assert "completed" in body["text"].lower()
+
+    async def test_no_telegram_when_notify_false(
+        self, mock_runner, worker_heart, worker_settings
+    ):
+        """No Telegram notification when subtask.notify is False."""
+        worker_settings.telegram_bot_token = "test-token"
+        worker_settings.telegram_chat_id = "12345"
+
+        mock_http = AsyncMock()
+        pool = SubtaskWorkerPool(
+            runner=mock_runner,
+            heart=worker_heart,
+            settings=worker_settings,
+            http_client=mock_http,
+        )
+
+        subtask = await worker_heart.subtasks.create(task="Silent task", notify=False)
+        dequeued = await worker_heart.subtasks.dequeue("test-worker")
+
+        await pool._execute_subtask(dequeued)
+
+        mock_http.post.assert_not_awaited()
