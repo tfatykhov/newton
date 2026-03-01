@@ -573,6 +573,17 @@ class CognitiveLayer:
         "that's correct", "you're right",
         # Lists / enumerations
         "here's a list", "the following",
+        # 009.5: Completion / status updates
+        "done!", "done.", "completed!", "finished!",
+        "on it!", "created!", "pushed to",
+        "review complete", "spec scores", "task is running",
+        # 009.5: Transition phrases
+        "now let me", "next i'll", "moving on to",
+        "let me check", "let me look",
+        "i'll start", "starting with",
+        # 009.5: Report phrases
+        "here's the result", "here are the results",
+        "pr #", "pr created",
     ]
 
     # 007.3: Emoji header pattern — status dump indicator

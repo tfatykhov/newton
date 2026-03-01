@@ -17,6 +17,7 @@ Key plan adjustments applied:
 
 import uuid
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
@@ -462,3 +463,52 @@ async def test_full_loop_conversation(cognitive, session):
 
     # end_session
     await cognitive.end_session("nous-default", sid, session=session)
+
+
+# ---------------------------------------------------------------------------
+# _is_informational pattern tests (009.5)
+# ---------------------------------------------------------------------------
+
+
+def _turn_result(text: str, tool_results: list[ToolResult] | None = None) -> TurnResult:
+    """Build a TurnResult with defaults for pattern tests."""
+    return TurnResult(
+        response_text=text,
+        tool_results=tool_results or [],
+    )
+
+
+# 009.5: Parametrized test for new informational patterns
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        # Completion / status updates
+        "Done!",
+        "Done.",
+        "Completed!",
+        "Finished!",
+        "On it!",
+        "Created!",
+        "Pushed to main successfully.",
+        "Review complete — no issues found.",
+        "Spec scores 8/10 on all criteria.",
+        "Task is running in the background.",
+        # Transition phrases
+        "Now let me check the database schema.",
+        "Next I'll update the configuration.",
+        "Moving on to the deployment step.",
+        "Let me check the test results.",
+        "Let me look at the error logs.",
+        "I'll start with the backend changes.",
+        "Starting with the API endpoint refactor.",
+        # Report phrases
+        "Here's the result of the analysis.",
+        "Here are the results from the test suite.",
+        "PR #42 is ready for review.",
+        "PR created and pushed to remote.",
+    ],
+)
+async def test_is_informational_new_patterns(cognitive, pattern):
+    """Each new 009.5 pattern is detected as informational."""
+    tr = _turn_result(pattern)
+    assert cognitive._is_informational(tr) is True
