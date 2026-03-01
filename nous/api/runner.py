@@ -274,6 +274,7 @@ class AgentRunner:
         user_display_name: str | None = None,
         platform: str | None = None,
         system_prompt_prefix: str | None = None,
+        skip_episode: bool = False,
     ) -> tuple[str, TurnContext, dict[str, int]]:
         """Execute a single conversational turn.
 
@@ -304,6 +305,7 @@ class AgentRunner:
             conversation_messages=recent_messages or None,
             user_id=user_id,
             user_display_name=user_display_name,
+            skip_episode=skip_episode,
         )
 
         # 3. Append user message

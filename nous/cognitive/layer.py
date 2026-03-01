@@ -138,6 +138,7 @@ class CognitiveLayer:
         conversation_messages: list[str] | None = None,
         user_id: str | None = None,
         user_display_name: str | None = None,
+        skip_episode: bool = False,
     ) -> TurnContext:
         """SENSE -> FRAME -> RECALL -> DELIBERATE — prepare for LLM turn.
 
@@ -296,7 +297,7 @@ class CognitiveLayer:
             decision_id = None
 
         # 5. EPISODE — start if no active episode AND interaction is significant
-        if session_id not in self._active_episodes:
+        if not skip_episode and session_id not in self._active_episodes:
             if self._should_create_episode(session_id, user_input):
                 try:
                     # B1: Check for duplicate — skip creation if found
