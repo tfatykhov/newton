@@ -1,4 +1,4 @@
-"""Tests for schedule management (011.1)."""
+"""Tests for schedule management and task scheduler (011.1)."""
 
 from datetime import UTC, datetime, timedelta
 
@@ -6,6 +6,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nous.config import Settings
+from nous.handlers.task_scheduler import TaskScheduler
+from nous.heart.heart import Heart
 from nous.heart.schedules import ScheduleManager
 from nous.storage.models import Schedule
 
@@ -181,3 +184,130 @@ class TestScheduleManager:
         updated = await schedule_mgr.get(schedule.id)
         assert updated.fire_count == 1
         assert updated.next_fire_at > now
+
+
+# ---------------------------------------------------------------------------
+# TaskScheduler tests
+# ---------------------------------------------------------------------------
+
+
+class TestTaskScheduler:
+    """Tests for the background task scheduler."""
+
+    @pytest.fixture
+    def scheduler_settings(self):
+        return Settings(schedule_check_interval=1)
+
+    @pytest_asyncio.fixture
+    async def scheduler_heart(self, db, scheduler_settings):
+        heart = Heart(db, scheduler_settings)
+        yield heart
+        await heart.close()
+
+    async def test_fires_due_once_schedule(self, scheduler_heart, scheduler_settings):
+        """A due once-schedule creates a subtask and deactivates."""
+        scheduler = TaskScheduler(scheduler_heart, scheduler_settings)
+
+        # Create a schedule that is already due
+        past = datetime.now(UTC) - timedelta(minutes=5)
+        schedule = await scheduler_heart.schedules.create(
+            task="One-shot reminder",
+            schedule_type="once",
+            fire_at=past,
+            timeout=60,
+            notify=True,
+        )
+
+        fired = await scheduler._fire_due_tasks()
+        assert fired == 1
+
+        # Subtask was created
+        subtasks = await scheduler_heart.subtasks.list(status="pending")
+        assert len(subtasks) >= 1
+        assert any(s.task == "One-shot reminder" for s in subtasks)
+
+        # Schedule deactivated
+        updated = await scheduler_heart.schedules.get(schedule.id)
+        assert updated.active is False
+
+    async def test_fires_and_advances_recurring(self, scheduler_heart, scheduler_settings):
+        """A due recurring schedule creates a subtask and advances next_fire_at."""
+        scheduler = TaskScheduler(scheduler_heart, scheduler_settings)
+
+        # Create a recurring schedule that is already due
+        schedule = await scheduler_heart.schedules.create(
+            task="Check conditions",
+            schedule_type="recurring",
+            interval_seconds=3600,
+        )
+        # Manually set next_fire_at to the past
+        async with scheduler_heart.db.session() as sess:
+            from sqlalchemy import update as sql_update
+            await sess.execute(
+                sql_update(Schedule)
+                .where(Schedule.id == schedule.id)
+                .values(next_fire_at=datetime.now(UTC) - timedelta(minutes=5))
+            )
+            await sess.commit()
+
+        fired = await scheduler._fire_due_tasks()
+        assert fired == 1
+
+        # Subtask created
+        subtasks = await scheduler_heart.subtasks.list(status="pending")
+        assert any(s.task == "Check conditions" for s in subtasks)
+
+        # Schedule still active with advanced next_fire_at
+        updated = await scheduler_heart.schedules.get(schedule.id)
+        assert updated.active is True
+        assert updated.fire_count == 1
+        assert updated.next_fire_at > datetime.now(UTC)
+
+    async def test_skips_future_schedules(self, scheduler_heart, scheduler_settings):
+        """Schedules with next_fire_at in the future are not fired."""
+        scheduler = TaskScheduler(scheduler_heart, scheduler_settings)
+
+        future = datetime.now(UTC) + timedelta(hours=2)
+        await scheduler_heart.schedules.create(
+            task="Future task",
+            schedule_type="once",
+            fire_at=future,
+        )
+
+        fired = await scheduler._fire_due_tasks()
+        assert fired == 0
+
+        # No subtasks created
+        subtasks = await scheduler_heart.subtasks.list(status="pending")
+        assert len(subtasks) == 0
+
+    async def test_handles_queue_full_gracefully(self, scheduler_heart, scheduler_settings):
+        """When subtask queue is full, scheduler logs warning and continues."""
+        scheduler = TaskScheduler(scheduler_heart, scheduler_settings)
+
+        # Fill the pending subtask queue (limit is 5)
+        for i in range(5):
+            await scheduler_heart.subtasks.create(task=f"Filler {i}")
+
+        # Create a due schedule
+        past = datetime.now(UTC) - timedelta(minutes=5)
+        await scheduler_heart.schedules.create(
+            task="Queue full schedule",
+            schedule_type="once",
+            fire_at=past,
+        )
+
+        # Should not raise, returns 0 (schedule skipped)
+        fired = await scheduler._fire_due_tasks()
+        assert fired == 0
+
+    async def test_start_and_stop(self, scheduler_heart, scheduler_settings):
+        """start() spawns task, stop() cancels it."""
+        scheduler = TaskScheduler(scheduler_heart, scheduler_settings)
+
+        await scheduler.start()
+        assert scheduler._task is not None
+        assert not scheduler._task.done()
+
+        await scheduler.stop()
+        assert scheduler._task is None
