@@ -274,3 +274,82 @@ async def test_start_dedup_allows_different(delib, brain, session):
         session_id="test-session", session=session,
     )
     assert id2 is not None
+
+
+# ---------------------------------------------------------------------------
+# 009.5: Quality gate at finalize
+# ---------------------------------------------------------------------------
+
+
+async def test_finalize_rejects_short_description(delib, brain, session):
+    """009.5: Description < 20 chars is rejected."""
+    frame = _frame()
+    decision_id = await delib.start("nous-default", "test short desc", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="Done!",
+        confidence=0.8,
+        session=session,
+    )
+    assert result is None
+
+    # Decision should be deleted
+    detail = await brain.get(uuid.UUID(decision_id), session=session)
+    assert detail is None
+
+
+async def test_finalize_rejects_default_confidence_high_stakes(delib, brain, session):
+    """009.5: confidence=0.5 + high stakes = never deliberated, reject."""
+    frame = _frame(default_stakes="high")
+    decision_id = await delib.start("nous-default", "some high stakes thing", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="Decided to restructure the entire database schema",
+        confidence=0.5,
+        session=session,
+    )
+    assert result is None
+
+
+async def test_finalize_rejects_chat_prefix(delib, brain, session):
+    """009.5: Description starting with chat pattern is rejected."""
+    frame = _frame()
+    decision_id = await delib.start("nous-default", "test chat prefix", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="Got it! I'll implement the feature now.",
+        confidence=0.8,
+        session=session,
+    )
+    assert result is None
+
+
+async def test_finalize_rejects_error_template(delib, brain, session):
+    """009.5: Error template description is rejected."""
+    frame = _frame()
+    decision_id = await delib.start("nous-default", "test error template", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="I encountered an error processing your request. Please try again.",
+        confidence=0.3,
+        session=session,
+    )
+    assert result is None
+
+
+async def test_finalize_passes_valid_decision(delib, brain, session):
+    """009.5: Valid decisions pass the quality gate."""
+    frame = _frame()
+    decision_id = await delib.start("nous-default", "test valid decision", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="Final: Use PostgreSQL with pgvector for semantic search",
+        confidence=0.85,
+        session=session,
+    )
+    assert result is not None

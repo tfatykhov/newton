@@ -29,6 +29,37 @@ _DEDUP_WINDOW_MINUTES = 5
 _DEDUP_EMBEDDING_THRESHOLD = 0.85
 _DEDUP_KEYWORD_THRESHOLD = 0.5
 
+# 009.5: Chat pattern prefixes that indicate noise
+_QUALITY_CHAT_PREFIXES = (
+    "done", "on it", "here's", "got it", "sure",
+    "okay", "alright", "working on", "let me", "i'll",
+)
+
+
+def _validate_decision_quality(description: str, confidence: float, stakes: str) -> str | None:
+    """Validate decision quality (009.5). Returns rejection reason or None if valid."""
+    desc_stripped = description.strip()
+
+    # Rule 1: Description too short
+    if len(desc_stripped) < 20:
+        return f"Description too short ({len(desc_stripped)} chars < 20)"
+
+    # Rule 2: Default confidence + high stakes (never deliberated)
+    if confidence == 0.5 and stakes in ("high", "critical"):
+        return f"Default confidence (0.5) with {stakes} stakes"
+
+    # Rule 3: Chat pattern prefix
+    desc_lower = desc_stripped.lower()
+    for prefix in _QUALITY_CHAT_PREFIXES:
+        if desc_lower.startswith(prefix):
+            return f"Description starts with chat pattern: '{prefix}'"
+
+    # Rule 4: Error template
+    if "encountered an error processing your request" in desc_lower:
+        return "Description is an error message template"
+
+    return None
+
 
 class DeliberationEngine:
     """Manages the deliberation lifecycle for a single turn.
@@ -112,13 +143,25 @@ class DeliberationEngine:
         pattern: str | None = None,
         tags: list[str] | None = None,
         session: AsyncSession | None = None,
-    ) -> None:
-        """Update decision with final outcome.
+    ) -> str | None:
+        """Update decision with final outcome. Returns decision_id or None if rejected (009.5).
 
-        P1-3: Uses extended Brain.update() with confidence param.
-        P2-6: Converts str decision_id to UUID for Brain.update().
-        Only updates fields that are not None.
+        009.5: Validates quality before persisting. Deletes on rejection.
         """
+        # 009.5: Fetch stakes from existing decision for quality gate
+        detail = await self._brain.get(UUID(decision_id), session=session)
+        if detail is None:
+            return None
+
+        stakes = detail.stakes
+
+        # 009.5: Quality gate
+        rejection = _validate_decision_quality(description, confidence, stakes)
+        if rejection:
+            logger.info("Quality gate rejected decision %s: %s", decision_id, rejection)
+            await self.delete(decision_id, session=session)
+            return None
+
         await self._brain.update(
             decision_id=UUID(decision_id),
             description=description,
@@ -128,6 +171,7 @@ class DeliberationEngine:
             tags=tags,
             session=session,
         )
+        return decision_id
 
     async def delete(
         self,
