@@ -419,6 +419,7 @@ CREATE TABLE IF NOT EXISTS heart.subtasks (
     worker_id VARCHAR(100),
     timeout_seconds INTEGER NOT NULL DEFAULT 120,
     notify BOOLEAN NOT NULL DEFAULT TRUE,
+    delivered BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
@@ -539,6 +540,9 @@ CREATE INDEX idx_subtasks_pending
     ON heart.subtasks (priority, created_at) WHERE status = 'pending';
 CREATE INDEX idx_subtasks_agent
     ON heart.subtasks (agent_id, created_at DESC);
+CREATE INDEX idx_subtasks_undelivered
+    ON heart.subtasks (parent_session_id, created_at)
+    WHERE status IN ('completed', 'failed') AND delivered = FALSE;
 
 -- --- heart.schedules indexes ---
 CREATE INDEX idx_schedules_next

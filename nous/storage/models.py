@@ -567,6 +567,7 @@ class Subtask(Base):
     worker_id: Mapped[str | None] = mapped_column(String(100))
     timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="120")
     notify: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

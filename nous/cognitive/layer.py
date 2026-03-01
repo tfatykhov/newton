@@ -63,6 +63,32 @@ def _is_recap_query(user_input: str) -> bool:
     return any(p in lower for p in _RECAP_PATTERNS)
 
 
+def _format_subtask_results(subtasks: list) -> str:
+    """Format undelivered subtask results for context injection."""
+    if not subtasks:
+        return ""
+
+    lines: list[str] = []
+    completed = [s for s in subtasks if s.status == "completed"]
+    failed = [s for s in subtasks if s.status == "failed"]
+
+    if completed:
+        for s in completed:
+            lines.append("=== Completed Subtask ===")
+            lines.append(f"[subtask-{s.id.hex[:8]}] Task: {s.task}")
+            lines.append(f"Result: {s.result}")
+            lines.append("")
+
+    if failed:
+        for s in failed:
+            lines.append("=== Failed Subtask ===")
+            lines.append(f"[subtask-{s.id.hex[:8]}] Task: {s.task}")
+            lines.append(f"Error: {s.error}")
+            lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 class CognitiveLayer:
     """The Nous Loop — orchestrates Brain and Heart into cognition.
 
@@ -138,6 +164,7 @@ class CognitiveLayer:
         conversation_messages: list[str] | None = None,
         user_id: str | None = None,
         user_display_name: str | None = None,
+        skip_episode: bool = False,
     ) -> TurnContext:
         """SENSE -> FRAME -> RECALL -> DELIBERATE — prepare for LLM turn.
 
@@ -286,6 +313,22 @@ class CognitiveLayer:
             logger.warning("Context build failed, using identity prompt only")
             system_prompt = self._context._identity_prompt or ""
 
+        # 3b. SUBTASK RESULTS — inject undelivered results into context
+        try:
+            undelivered = await self._heart.subtasks.get_undelivered(session_id)
+            if undelivered:
+                subtask_context = _format_subtask_results(undelivered)
+                if subtask_context:
+                    system_prompt = system_prompt + "\n\n" + subtask_context
+                    delivered_ids = [s.id for s in undelivered]
+                    await self._heart.subtasks.mark_delivered(delivered_ids)
+                    logger.info(
+                        "Injected %d subtask results into session %s",
+                        len(undelivered), session_id,
+                    )
+        except Exception:
+            logger.warning("Failed to inject subtask results for session %s", session_id)
+
         # 4. DELIBERATE — start if frame warrants it
         decision_id: str | None = None
         try:
@@ -296,7 +339,7 @@ class CognitiveLayer:
             decision_id = None
 
         # 5. EPISODE — start if no active episode AND interaction is significant
-        if session_id not in self._active_episodes:
+        if not skip_episode and session_id not in self._active_episodes:
             if self._should_create_episode(session_id, user_input):
                 try:
                     # B1: Check for duplicate — skip creation if found

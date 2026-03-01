@@ -148,6 +148,7 @@ class SubtaskWorkerPool:
                 user_message=subtask.task,
                 agent_id=self._settings.agent_id,
                 system_prompt_prefix=system_prefix,
+                skip_episode=True,
             )
 
             await self._heart.subtasks.complete(subtask.id, response_text)
