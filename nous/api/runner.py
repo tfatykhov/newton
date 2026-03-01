@@ -273,6 +273,7 @@ class AgentRunner:
         user_id: str | None = None,
         user_display_name: str | None = None,
         platform: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> tuple[str, TurnContext, dict[str, int]]:
         """Execute a single conversational turn.
 
@@ -315,6 +316,8 @@ class AgentRunner:
         error = None
         try:
             system_prompt = self._build_system_prompt(turn_context, platform=platform)
+            if system_prompt_prefix:
+                system_prompt = system_prompt_prefix + "\n\n" + system_prompt
 
             # Layer 2: History compaction (Spec 008.1)
             if self._compactor and self._settings.compaction_enabled:
@@ -593,6 +596,7 @@ class AgentRunner:
         user_id: str | None = None,
         user_display_name: str | None = None,
         platform: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Full chat turn with streaming, including tool loops.
 
@@ -621,6 +625,8 @@ class AgentRunner:
         conversation.messages.append(Message(role="user", content=user_message))
 
         system_prompt = self._build_system_prompt(turn_context, platform=platform)
+        if system_prompt_prefix:
+            system_prompt = system_prompt_prefix + "\n\n" + system_prompt
         tools = self._dispatcher.available_tools(turn_context.frame.frame_id)
         messages = self._format_messages(conversation)
 
