@@ -145,14 +145,19 @@ async def create_components(settings: Settings) -> dict:
             from nous.handlers.decision_reviewer import DecisionReviewer
 
             if settings.decision_review_enabled:
-                DecisionReviewer(brain, settings, bus, handler_http)
+                decision_reviewer = DecisionReviewer(brain, settings, bus, handler_http)
+            else:
+                decision_reviewer = None
         except ImportError:
+            decision_reviewer = None
             logger.debug("DecisionReviewer not available yet")
 
         # Start bus + monitor
         await bus.start()
         if session_monitor:
             await session_monitor.start()
+        if decision_reviewer:
+            await decision_reviewer.start()
 
     # Create tool dispatcher and register all tools
     dispatcher = ToolDispatcher()
