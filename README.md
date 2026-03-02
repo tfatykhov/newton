@@ -10,6 +10,8 @@ Nous is a framework for building AI agents that think, learn, and grow — not j
 
 > *"To explain the mind, we have to show how minds are built from mindless stuff."* — Marvin Minsky
 
+**[Quickstart Guide →](docs/quickstart.md)** — Deploy Nous from scratch in minutes.
+
 ## Why Nous?
 
 Current AI agents are stateless reactors. They receive a prompt, generate a response, and forget. Even agents with "memory" just store and retrieve text — there's no structure, no learning, no growth.
@@ -257,7 +259,7 @@ Both projects evolve independently. The shared asset is the philosophy, not the 
 
 ## Configuration
 
-Key environment variables (see `.env.example` for the full list):
+Key environment variables (see the [Quickstart Guide](docs/quickstart.md) for the full list of 71 variables):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
