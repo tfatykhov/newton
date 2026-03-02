@@ -31,6 +31,10 @@ ANTHROPIC_API_KEY=sk-ant-...          # Or use ANTHROPIC_AUTH_TOKEN instead
 OPENAI_API_KEY=sk-...                 # Enables semantic search (embeddings)
 BRAVE_SEARCH_API_KEY=BSA...           # Enables web_search tool
 
+# === TELEGRAM BOT (optional) ===
+TELEGRAM_BOT_TOKEN=123456:ABC-...     # From @BotFather
+NOUS_ALLOWED_USERS=12345,67890        # Comma-separated Telegram user IDs
+
 # === DATABASE (defaults work for Docker) ===
 # DB_HOST=localhost
 # DB_PORT=5432
@@ -45,12 +49,15 @@ BRAVE_SEARCH_API_KEY=BSA...           # Enables web_search tool
 docker compose up -d
 ```
 
-This launches two containers:
+This launches three containers:
 
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
 | `nous-postgres` | `pgvector/pgvector:pg17` | 5432 | PostgreSQL + pgvector |
 | `nous-agent` | Built from `Dockerfile` | 8000 | Nous agent (REST + MCP) |
+| `nous-telegram` | Built from `Dockerfile` | — | Telegram bot (chat interface) |
+
+> The `telegram` service is optional. If `TELEGRAM_BOT_TOKEN` is not set, the container starts but the bot exits immediately. To skip it entirely, run `docker compose up -d nous postgres`.
 
 PostgreSQL initializes automatically with:
 - `sql/init.sql` — Creates 3 schemas, 23 tables, 79 indexes, pgvector + pg_trgm extensions
@@ -128,15 +135,25 @@ uv run pytest tests/ -v
 
 ## 3. Telegram Bot (Optional)
 
-The Telegram bot is a standalone process that connects to the Nous REST API.
+The Telegram bot runs as a separate container in docker-compose, connecting to the Nous REST API over the internal Docker network.
+
+**Docker (included in `docker compose up`):**
+
+Set `TELEGRAM_BOT_TOKEN` and optionally `NOUS_ALLOWED_USERS` in your `.env` file. The bot starts automatically alongside the agent.
+
+To run only the agent without the bot:
 
 ```bash
-# Set these env vars
+docker compose up -d nous postgres
+```
+
+**Local development (standalone):**
+
+```bash
 export TELEGRAM_BOT_TOKEN=123456:ABC-...    # From @BotFather
 export NOUS_API_URL=http://localhost:8000    # Nous REST API URL
 export NOUS_ALLOWED_USERS=12345,67890       # Optional: restrict access
 
-# Run
 uv run python -m nous.telegram_bot
 ```
 
@@ -350,15 +367,15 @@ Experimental. Compresses full conversation history when token count exceeds thre
 
 ---
 
-### 4.18 Standalone Telegram Bot
+### 4.18 Telegram Bot
 
-These are used only by `python -m nous.telegram_bot` (not the main Nous process). They are read directly from `os.environ`, not from the Settings class.
+Used by the `telegram` container in docker-compose and by `python -m nous.telegram_bot` when running standalone. These are read directly from `os.environ`, not from the Settings class.
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | — | **Required** | Telegram bot token from @BotFather. The bot uses long-polling to receive messages. |
-| `NOUS_API_URL` | `http://localhost:8000` | Optional | Base URL of the Nous REST API the bot connects to. |
-| `NOUS_ALLOWED_USERS` | `""` (allow all) | Optional | Comma-separated Telegram user IDs allowed to interact. Empty = unrestricted access. |
+| `TELEGRAM_BOT_TOKEN` | — | **Required** | Telegram bot token from @BotFather. The bot uses long-polling to receive messages. Without this, the bot exits on startup. |
+| `NOUS_API_URL` | `http://localhost:8000` | Optional | Base URL of the Nous REST API the bot connects to. In Docker, this is set to `http://nous:8000` automatically by docker-compose. |
+| `NOUS_ALLOWED_USERS` | `""` (allow all) | Optional | Comma-separated Telegram user IDs allowed to interact. Empty = unrestricted access. Set this in production to prevent unauthorized use. |
 
 ---
 
@@ -376,11 +393,11 @@ These are used only by `python -m nous.telegram_bot` (not the main Nous process)
 
 ```
                     +-----------+
-                    |  Telegram  |  (standalone process)
+                    |  Telegram  |  (docker-compose service)
                     |    Bot     |
                     +-----+-----+
                           |
-                          | REST API
+                          | REST API (internal)
                           v
 +-------------------------+-------------------------+
 |                    Nous Agent                      |
@@ -504,6 +521,10 @@ OPENAI_API_KEY=sk-...
 
 # Web search (optional)
 BRAVE_SEARCH_API_KEY=BSA...
+
+# Telegram bot (optional)
+TELEGRAM_BOT_TOKEN=123456:ABC-...
+NOUS_ALLOWED_USERS=12345
 
 # Agent identity
 NOUS_AGENT_ID=prod-nous
