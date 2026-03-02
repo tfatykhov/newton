@@ -295,7 +295,7 @@ All core architecture is implemented and running:
 | Episode Summary Quality (008.3-008.4) | ✅ Shipped | Backfill + enhanced prompt, candidate_facts, smart truncation, decision context |
 | Phase 1 Voice | ✅ Shipped | Email, Telegram notify, Emerson A2A — zero code changes via procedures |
 
-**Stats:** ~32,800 lines of Python · 786 tests · 16 Postgres tables · Docker deployment
+**Stats:** ~38,800 lines of Python · 971 tests · 18 Postgres tables · Docker deployment
 
 See [Feature Index](docs/features/INDEX.md) for the full breakdown.
 

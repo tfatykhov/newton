@@ -66,7 +66,8 @@ All shipped implementation specs with PR references:
 | 008.4 | Episode Summary Quality | ✅ Shipped | — enhanced prompt, candidate_facts, smart truncation, decision context |
 | 008.5 | Decision Review Loop | ✅ Shipped | #81 — auto-review signals, REST endpoints, calibration snapshots |
 | 009.1-009.4 | Memory Lifecycle Implementation | 📦 Shelved | — system too young (53 facts, 86 episodes at time of assessment) |
-| 009.5 | Decision Quality Gate | 📋 Specced | — 3-layer filter: source filtering, dedup window, quality gate. Fixes 43% noise rate |
+| 008.6 | Temporal Recall | ✅ Shipped | — dual-path retrieval: time-based + semantic. Fixes cross-domain recall gap |
+| 009.5 | Decision Quality Gate | ✅ Shipped | #92 — 3-layer filter: source filtering, dedup window, quality gate. Fixes 43% noise rate |
 | 010.1 | Health Dashboard (F007 Phase 1) | 📋 Specced | — enrich GET /status |
 | — | Streaming Keepalive + Tool Timeout | ✅ Shipped | #73 — keepalive during Anthropic wait, `NOUS_TOOL_TIMEOUT` |
 | — | Typing Indicator Fix | ✅ Shipped | — continuous typing via background task |
@@ -76,6 +77,9 @@ All shipped implementation specs with PR references:
 | — | RRF Score Fix | ✅ Shipped | #64 — use original hybrid scores instead of RRF ranking |
 | — | Query Deduplication Fix | ✅ Shipped | — prevent doubled query when topic = input |
 | — | Tier 3 Threshold Tuning | ✅ Shipped | #66 — decision threshold 0.3→0.20 |
+| — | Timezone Fix (ORM models) | ✅ Shipped | #87 — DateTime(timezone=True) on all 27 timestamp columns |
+| — | /new Session Ending | ✅ Shipped | #88 — /new now calls DELETE /chat/{session_id}, fires session_ended for all handlers |
+| — | Periodic Decision Sweep | ✅ Shipped | #89 — background asyncio loop, configurable interval (default 1hr) |
 | 011.1 | Subtasks & Scheduling | ✅ Shipped | #85 — F009: subtask queue, worker pool, scheduling, time parser, 4 tools, 6 endpoints |
 | 011.2 | Subtask Result Delivery | ✅ Shipped | — subtask results auto-injected into parent session context, skip_episode for workers, delivered tracking |
 
