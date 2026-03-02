@@ -353,3 +353,19 @@ async def test_finalize_passes_valid_decision(delib, brain, session):
         session=session,
     )
     assert result is not None
+
+
+async def test_finalize_allows_tool_error_high_stakes(delib, brain, session):
+    """009.5 P1 fix: confidence=0.5 from tool error + high stakes should NOT be rejected."""
+    frame = _frame(default_stakes="high")
+    decision_id = await delib.start("nous-default", "high stakes with tool error", frame, session=session)
+
+    result = await delib.finalize(
+        decision_id,
+        description="Decided to restructure the entire database schema",
+        confidence=0.5,
+        has_tool_errors=True,
+        session=session,
+    )
+    # Should pass — 0.5 was caused by tool error, not by lack of deliberation
+    assert result is not None

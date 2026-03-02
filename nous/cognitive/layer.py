@@ -486,6 +486,7 @@ class CognitiveLayer:
                         decision_id,
                         description=turn_result.response_text[:200],
                         confidence=confidence,
+                        has_tool_errors=has_tool_errors,
                         session=session,
                     )
                 except Exception:

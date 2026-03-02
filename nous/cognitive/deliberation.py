@@ -36,7 +36,9 @@ _QUALITY_CHAT_PREFIXES = (
 )
 
 
-def _validate_decision_quality(description: str, confidence: float, stakes: str) -> str | None:
+def _validate_decision_quality(
+    description: str, confidence: float, stakes: str, *, has_tool_errors: bool = False,
+) -> str | None:
     """Validate decision quality (009.5). Returns rejection reason or None if valid."""
     desc_stripped = description.strip()
 
@@ -45,7 +47,8 @@ def _validate_decision_quality(description: str, confidence: float, stakes: str)
         return f"Description too short ({len(desc_stripped)} chars < 20)"
 
     # Rule 2: Default confidence + high stakes (never deliberated)
-    if confidence == 0.5 and stakes in ("high", "critical"):
+    # Skip if tool errors caused the 0.5 — that's a real decision with a transient failure
+    if confidence == 0.5 and stakes in ("high", "critical") and not has_tool_errors:
         return f"Default confidence (0.5) with {stakes} stakes"
 
     # Rule 3: Chat pattern prefix
@@ -142,6 +145,7 @@ class DeliberationEngine:
         context: str | None = None,
         pattern: str | None = None,
         tags: list[str] | None = None,
+        has_tool_errors: bool = False,
         session: AsyncSession | None = None,
     ) -> str | None:
         """Update decision with final outcome. Returns decision_id or None if rejected (009.5).
@@ -156,7 +160,9 @@ class DeliberationEngine:
         stakes = detail.stakes
 
         # 009.5: Quality gate
-        rejection = _validate_decision_quality(description, confidence, stakes)
+        rejection = _validate_decision_quality(
+            description, confidence, stakes, has_tool_errors=has_tool_errors,
+        )
         if rejection:
             logger.info("Quality gate rejected decision %s: %s", decision_id, rejection)
             await self.delete(decision_id, session=session)
@@ -221,13 +227,18 @@ class DeliberationEngine:
         if self._brain.embeddings:
             try:
                 desc_embedding = await self._brain.embeddings.embed(description)
+                had_comparison = False
                 for decision in recent:
                     stored = await self._get_decision_embedding(decision.id, session=session)
                     if stored is not None:
+                        had_comparison = True
                         sim = self._cosine_similarity(desc_embedding, stored)
                         if sim > _DEDUP_EMBEDDING_THRESHOLD:
                             return True
-                return False
+                # Only skip keyword fallback if we actually compared embeddings
+                if had_comparison:
+                    return False
+                # No stored embeddings found — fall through to keyword overlap
             except Exception:
                 logger.debug("Embedding dedup failed, falling back to keyword overlap")
 
