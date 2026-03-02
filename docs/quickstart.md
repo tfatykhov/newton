@@ -189,8 +189,7 @@ These variables are **unprefixed** to share a single `.env` file with docker-com
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
-| `ANTHROPIC_API_KEY` | `""` | **Required*** | Anthropic API key for LLM inference. Used as `x-api-key` header. *Required unless `ANTHROPIC_AUTH_TOKEN` is set. |
-| `ANTHROPIC_AUTH_TOKEN` | `""` | **Required*** | OAT Bearer token for Anthropic Max subscription. Takes precedence over `ANTHROPIC_API_KEY` if both are set. *Required unless `ANTHROPIC_API_KEY` is set. |
+| `ANTHROPIC_API_KEY` | `""` | **Required** | Anthropic API key for LLM inference. Used as `x-api-key` header. |
 | `OPENAI_API_KEY` | `""` | **Recommended** | OpenAI API key for embeddings (`text-embedding-3-small`). Without this, semantic search, deduplication, and vector similarity are disabled. Nous falls back to keyword-only search. |
 | `BRAVE_SEARCH_API_KEY` | `""` | **Recommended** | Brave Search API key. Enables the `web_search` agent tool. Without this, the tool is unavailable. |
 | `GITHUB_TOKEN` | `""` | Optional | GitHub personal access token. Used by knowledge extraction features. |
@@ -509,9 +508,8 @@ Tools available to the agent during conversations:
 A production `.env` file with security-conscious defaults:
 
 ```bash
-# Authentication (pick one)
+# Authentication
 ANTHROPIC_API_KEY=sk-ant-...
-# ANTHROPIC_AUTH_TOKEN=oat-...       # Use this for Max subscription
 
 # Database (change password!)
 DB_PASSWORD=<strong-random-password>
