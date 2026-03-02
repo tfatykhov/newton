@@ -390,55 +390,7 @@ Used by the `telegram` container in docker-compose and by `python -m nous.telegr
 
 ## 5. Architecture Overview
 
-```
-                    +-----------+
-                    |  Telegram  |  (docker-compose service)
-                    |    Bot     |
-                    +-----+-----+
-                          |
-                          | REST API (internal)
-                          v
-+-------------------------+-------------------------+
-|                    Nous Agent                      |
-|                                                    |
-|  +-----------+  +-----------+  +---------------+   |
-|  | REST API  |  |MCP Server |  | Agent Runner  |   |
-|  | (Starlette|  |  (/mcp)   |  | (httpx →      |   |
-|  |  :8000)   |  |           |  |  Anthropic)   |   |
-|  +-----+-----+  +-----+-----+  +-------+-------+   |
-|        |              |                |             |
-|        +--------------+--------+-------+             |
-|                                |                     |
-|                    +-----------+-----------+          |
-|                    |  Cognitive Layer       |          |
-|                    |  (frames, context,     |          |
-|                    |   deliberation,        |          |
-|                    |   monitoring)          |          |
-|                    +-----------+-----------+          |
-|                         |           |                |
-|                    +----+----+ +----+----+           |
-|                    |  Brain  | |  Heart  |           |
-|                    | (decide,| | (memory,|           |
-|                    |  reason,| |  learn, |           |
-|                    |  guard) | |  recall)|           |
-|                    +----+----+ +----+----+           |
-|                         |           |                |
-|                    +----+-----------+----+           |
-|                    |     Event Bus       |           |
-|                    | (sleep, summarize,  |           |
-|                    |  extract, review,   |           |
-|                    |  subtasks, schedule)|           |
-|                    +--------------------+           |
-+-------------------------+-------------------------+
-                          |
-                          v
-                   +--------------+
-                   |  PostgreSQL  |
-                   |  + pgvector  |
-                   |  (3 schemas, |
-                   |   23 tables) |
-                   +--------------+
-```
+![Nous Architecture](nous-architecture.png)
 
 ### Schemas
 
