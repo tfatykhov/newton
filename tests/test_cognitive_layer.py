@@ -17,6 +17,7 @@ Key plan adjustments applied:
 
 import uuid
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
@@ -462,3 +463,118 @@ async def test_full_loop_conversation(cognitive, session):
 
     # end_session
     await cognitive.end_session("nous-default", sid, session=session)
+
+
+# ---------------------------------------------------------------------------
+# _is_informational pattern tests (009.5)
+# ---------------------------------------------------------------------------
+
+
+def _turn_result(text: str, tool_results: list[ToolResult] | None = None) -> TurnResult:
+    """Build a TurnResult with defaults for pattern tests."""
+    return TurnResult(
+        response_text=text,
+        tool_results=tool_results or [],
+    )
+
+
+# 009.5: Parametrized test for new informational patterns
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        # Completion / status updates
+        "Done!",
+        "Done.",
+        "Completed!",
+        "Finished!",
+        "On it!",
+        "Created!",
+        "Pushed to main successfully.",
+        "Review complete — no issues found.",
+        "Spec scores 8/10 on all criteria.",
+        "Task is running in the background.",
+        # Transition phrases
+        "Now let me check the database schema.",
+        "Next I'll update the configuration.",
+        "Moving on to the deployment step.",
+        "Let me check the test results.",
+        "Let me look at the error logs.",
+        "I'll start with the backend changes.",
+        "Starting with the API endpoint refactor.",
+        # Report phrases
+        "Here's the result of the analysis.",
+        "Here are the results from the test suite.",
+        "PR #42 is ready for review.",
+        "PR created and pushed to remote.",
+    ],
+)
+async def test_is_informational_new_patterns(cognitive, pattern):
+    """Each new 009.5 pattern is detected as informational."""
+    tr = _turn_result(pattern)
+    assert cognitive._is_informational(tr) is True
+
+
+# ---------------------------------------------------------------------------
+# _is_action_report tests (009.5)
+# ---------------------------------------------------------------------------
+
+
+_TOOL_RESULTS = [ToolResult(tool_name="write_file", result="ok")]
+
+
+async def test_is_action_report_with_tools_and_markers(cognitive):
+    """Tools used + 2+ report markers in first 300 chars -> True."""
+    tr = _turn_result(
+        "Done. I created the migration file and updated the schema.",
+        tool_results=_TOOL_RESULTS,
+    )
+    assert cognitive._is_action_report(tr) is True
+
+
+async def test_is_action_report_no_tools(cognitive):
+    """No tool calls -> False regardless of markers."""
+    tr = _turn_result(
+        "Done. I created the migration file and updated the schema.",
+    )
+    assert cognitive._is_action_report(tr) is False
+
+
+async def test_is_action_report_one_marker(cognitive):
+    """Tools + only 1 marker -> False (threshold is 2)."""
+    tr = _turn_result(
+        "The file has been saved to disk.",
+        tool_results=_TOOL_RESULTS,
+    )
+    assert cognitive._is_action_report(tr) is False
+
+
+async def test_is_informational_delegates_to_action_report(cognitive):
+    """_is_informational returns True when _is_action_report fires."""
+    tr = _turn_result(
+        "I pushed the changes and merged the PR successfully.",
+        tool_results=_TOOL_RESULTS,
+    )
+    # This text doesn't match any keyword pattern, but has 2+ action markers
+    # ("pushed", "merged") with tool results, so _is_action_report catches it
+    assert cognitive._is_informational(tr) is True
+
+
+# ---------------------------------------------------------------------------
+# 009.5: Integration — task frame no longer triggers deliberation
+# ---------------------------------------------------------------------------
+
+
+async def test_task_frame_no_deliberation(cognitive):
+    """009.5: Task frame no longer triggers auto-deliberation."""
+    from nous.cognitive.schemas import FrameSelection
+
+    frame = FrameSelection(
+        frame_id="task",
+        frame_name="Task Execution",
+        confidence=0.9,
+        match_method="pattern",
+        default_category="tooling",
+        default_stakes="medium",
+    )
+    result = await cognitive._deliberation.should_deliberate(frame)
+    assert result is False

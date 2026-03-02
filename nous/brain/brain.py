@@ -158,6 +158,62 @@ class Brain:
         return summaries, total
 
     # ------------------------------------------------------------------
+    # get_recent_decisions() — 009.5
+    # ------------------------------------------------------------------
+
+    async def get_recent_decisions(
+        self,
+        agent_id: str,
+        since: datetime,
+        limit: int = 5,
+        session_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> list[DecisionSummary]:
+        """Fetch recent decisions since a cutoff time, optionally scoped to session (009.5)."""
+        if session is None:
+            async with self.db.session() as session:
+                return await self._get_recent_decisions(agent_id, since, limit, session_id, session)
+        return await self._get_recent_decisions(agent_id, since, limit, session_id, session)
+
+    async def _get_recent_decisions(
+        self,
+        agent_id: str,
+        since: datetime,
+        limit: int,
+        session_id: str | None,
+        session: AsyncSession,
+    ) -> list[DecisionSummary]:
+        stmt = (
+            select(Decision)
+            .where(
+                Decision.agent_id == agent_id,
+                Decision.created_at >= since,
+            )
+            .order_by(Decision.created_at.desc())
+            .limit(limit)
+        )
+        if session_id is not None:
+            stmt = stmt.where(Decision.session_id == session_id)
+
+        result = await session.execute(stmt)
+        decisions = list(result.scalars().all())
+
+        return [
+            DecisionSummary(
+                id=d.id,
+                description=d.description,
+                confidence=d.confidence,
+                category=d.category,
+                stakes=d.stakes,
+                outcome=d.outcome or "pending",
+                pattern=d.pattern,
+                tags=[],
+                created_at=d.created_at,
+            )
+            for d in decisions
+        ]
+
+    # ------------------------------------------------------------------
     # record()
     # ------------------------------------------------------------------
 

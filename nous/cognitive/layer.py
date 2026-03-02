@@ -333,7 +333,10 @@ class CognitiveLayer:
         decision_id: str | None = None
         try:
             if await self._deliberation.should_deliberate(frame):
-                decision_id = await self._deliberation.start(agent_id, user_input[:200], frame, session=session)
+                decision_id = await self._deliberation.start(
+                    agent_id, user_input[:200], frame,
+                    session_id=session_id, session=session,
+                )
         except Exception:
             logger.warning("Deliberation start failed, continuing without decision_id")
             decision_id = None
@@ -483,6 +486,7 @@ class CognitiveLayer:
                         decision_id,
                         description=turn_result.response_text[:200],
                         confidence=confidence,
+                        has_tool_errors=has_tool_errors,
                         session=session,
                     )
                 except Exception:
@@ -573,6 +577,17 @@ class CognitiveLayer:
         "that's correct", "you're right",
         # Lists / enumerations
         "here's a list", "the following",
+        # 009.5: Completion / status updates
+        "done!", "done.", "completed!", "finished!",
+        "on it!", "created!", "pushed to",
+        "review complete", "spec scores", "task is running",
+        # 009.5: Transition phrases
+        "now let me", "next i'll", "moving on to",
+        "let me check", "let me look",
+        "i'll start", "starting with",
+        # 009.5: Report phrases
+        "here's the result", "here are the results",
+        "pr #", "pr created",
     ]
 
     # 007.3: Emoji header pattern — status dump indicator
@@ -638,17 +653,18 @@ class CognitiveLayer:
         return text[:200]
 
     def _is_informational(self, turn_result: TurnResult) -> bool:
-        """Detect responses that are information, not decisions (006.2, 007.3).
+        """Detect responses that are information, not decisions (006.2, 007.3, 009.5).
 
         Returns True when the response is a status dump, memory recall,
         acknowledgment, or list that should NOT be recorded as a decision.
 
         Checks (in order):
         1. If record_decision tool was called -> always a real decision
-        2. Keyword patterns (expanded 007.3)
+        2. Keyword patterns (expanded 007.3, 009.5)
         3. Structural: emoji header (status dump pattern)
         4. Structural: very short response (< 50 chars) without tools
         5. Structural: list-dominated response (> 60% bullet lines)
+        6. Action report: tools used + response summarizes what was done (009.5)
         """
         # If agent explicitly recorded a decision, it's real
         tools_used = {r.tool_name for r in turn_result.tool_results}
@@ -677,7 +693,31 @@ class CognitiveLayer:
             if list_lines / len(lines) > 0.6:
                 return True
 
+        # 5. Action report: tools used + response summarizes what was done (009.5)
+        if self._is_action_report(turn_result):
+            return True
+
         return False
+
+    # 009.5: Report markers for action report detection
+    _ACTION_REPORT_MARKERS = [
+        "done", "created", "updated", "fixed", "merged",
+        "pushed", "committed", "deployed", "sent", "saved",
+        "completed", "finished", "resolved", "applied",
+    ]
+
+    def _is_action_report(self, turn_result: TurnResult) -> bool:
+        """Detect responses that report completed actions, not decisions (009.5).
+
+        Pattern: tool calls happened + response summarizes what was done.
+        If 2+ report markers in first 300 chars after tool use -> action report.
+        """
+        if not turn_result.tool_results:
+            return False
+
+        response_lower = turn_result.response_text[:300].lower()
+        matches = sum(1 for m in self._ACTION_REPORT_MARKERS if m in response_lower)
+        return matches >= 2
 
     # ------------------------------------------------------------------
     # Episode significance & dedup (005.5)
