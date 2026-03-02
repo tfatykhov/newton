@@ -49,6 +49,18 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  telegram:
+    build: .
+    container_name: nous-telegram
+    command: python -m nous.telegram_bot
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      NOUS_API_URL: http://nous:8000
+      NOUS_ALLOWED_USERS: ${NOUS_ALLOWED_USERS:-}
+    depends_on:
+      - nous
+    restart: unless-stopped
+
   postgres:
     image: pgvector/pgvector:pg17
     container_name: nous-postgres
